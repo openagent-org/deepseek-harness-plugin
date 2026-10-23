@@ -3,6 +3,7 @@ import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { harnessHome, prepareAuthDirectory } from './login.mjs'
 import * as Browser from './browser-host.mjs'
+import * as Onboarding from './onboarding-host.mjs'
 
 export const name = 'openagent'
 export const inject = ['tools', 'skills']
@@ -34,4 +35,7 @@ export async function apply(ctx) {
   } catch {
     ctx.logger.error('OPENAGENT_MCP_UNAVAILABLE: OpenAgent MCP 首次连接失败；Skills 与浏览器桥接仍保留，不能据此宣称 OpenAgent 可用。请先修复连接，再由真实账户工具确认。')
   }
+  ctx.inject(['typert', 'agents', 'sessions', 'profileContext', 'workingDirectory'], async scope => {
+    await scope.plugin(Onboarding)
+  })
 }

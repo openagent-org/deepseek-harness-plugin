@@ -1,0 +1,208 @@
+#!/usr/bin/env node
+// 安装预约只保存一次发送所需的标识；不重启应用，不读取认证或会话正文。
+import { constants } from 'node:fs'
+import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
+import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { onboardingFailureCodes } from './onboarding-protocol.mjs'
+
+const fail = () => { throw new Error('OPENAGENT_ONBOARDING_STATE_INVALID') }
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+const exact = (value, keys) => { if (!object(value) || Object.keys(value).some(key => !keys.includes(key))) fail(); return value }
+const id = value => { if (typeof value !== 'string' || !value || value.length > 512 || /[\x00-\x1f\x7f]/.test(value)) fail(); return value }
+const hash = value => createHash('sha256').update(id(value)).digest('hex')
+const versionOk = value => typeof value === 'string' && value.length <= 100 && /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(value)
+const checkedRecord = value => {
+  exact(value, ['targetSessionId', 'requestId', 'promptId', 'locale'])
+  for (const key of ['targetSessionId', 'requestId', 'promptId']) id(value[key])
+  if (!['zh-CN', 'en'].includes(value.locale)) fail()
+  return { targetSessionId: value.targetSessionId, requestId: value.requestId, promptId: value.promptId, locale: value.locale }
+}
+const resultKeys = ['status', 'request_id', 'session_id', 'code', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed']
+const checkedResult = (value, record) => {
+  exact(value, resultKeys)
+  if (!['completed', 'failed', 'unconfirmed'].includes(value.status)
+    || value.request_id !== record.requestId || value.session_id !== record.targetSessionId) fail()
+  if (value.status === 'completed') {
+    if ('code' in value || resultKeys.slice(4).some(key => value[key] !== true)) fail()
+  } else if (!onboardingFailureCodes.includes(value.code)
+    || resultKeys.slice(4).some(key => key in value)) fail()
+  return Object.fromEntries(resultKeys.filter(key => key in value).map(key => [key, value[key]]))
+}
+const unknown = record => ({ status: 'unconfirmed', code: 'ONBOARDING_ALREADY_CLAIMED',
+  request_id: record.requestId, session_id: record.targetSessionId })
+
+async function inspect(path, directory, privateFile = false) {
+  const stat = await lstat(path)
+  if (stat.isSymbolicLink() || !(directory ? stat.isDirectory() : stat.isFile())) fail()
+  if (privateFile && ((process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
+    || (process.getuid && stat.uid !== process.getuid()) || (!directory && stat.nlink !== 1))) fail()
+  return stat
+}
+async function readJson(path, privateFile = true) {
+  try {
+    const before = await inspect(path, false, privateFile)
+    if (before.size > 65536) fail()
+    const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    try {
+      const actual = await file.stat()
+      if (before.ino !== actual.ino || before.dev !== actual.dev) fail()
+      return JSON.parse(await file.readFile('utf8'))
+    } finally { await file.close() }
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+}
+async function writeExclusive(path, value) {
+  const file = await open(path, 'wx', 0o600)
+  // 写入失败保留占用标记，后续只能报未知，不能重新发送。
+  try { await file.writeFile(JSON.stringify(value)); await file.sync() }
+  finally { await file.close() }
+}
+
+export function createOnboardingStore({ profileDir, version }) {
+  if (!versionOk(version)) fail()
+  const profile = resolve(profileDir)
+  const root = join(profile, '.openagent-onboarding', version)
+  const folder = async (create = false) => {
+    await inspect(profile, true)
+    if (await realpath(profile) !== profile) fail()
+    for (const path of [dirname(root), root]) {
+      if (create) await mkdir(path, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+      try { await inspect(path, true, true) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+    }
+    return root
+  }
+  const validate = (value, sourceSessionId, pending = false) => {
+    exact(value, ['schema', 'version', 'sourceSessionId', 'record', ...(pending ? ['expiresAt'] : [])])
+    if (value.schema !== 1 || value.version !== version || value.sourceSessionId !== id(sourceSessionId)) fail()
+    checkedRecord(value.record)
+    if (pending) { if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= 0) fail() }
+    return value
+  }
+  const load = async source => {
+    if (!await folder()) return null
+    const value = await readJson(join(root, `${hash(source)}.json`))
+    return value === null ? null : validate(value, source)
+  }
+  const receipt = async (source, state) => {
+    const value = await readJson(join(root, `${hash(source)}.result.json`))
+    if (value === null) return null
+    exact(value, ['schema', 'version', 'sourceSessionId', 'result'])
+    if (!state || value.schema !== 1 || value.version !== version || value.sourceSessionId !== source) fail()
+    return checkedResult(value.result, state.record)
+  }
+  const store = {
+    async reserve(source, record) {
+      id(source); record = checkedRecord(record)
+      await folder(true)
+      const existing = await store.read(source)
+      if (existing) return { reserved: false, result: existing }
+      const value = { schema: 1, version, sourceSessionId: source, record }
+      try { await writeExclusive(join(root, `${hash(source)}.json`), value); return { reserved: true } }
+      catch (error) {
+        if (error.code !== 'EEXIST') throw error
+        const result = await store.read(source)
+        if (!result) fail()
+        return { reserved: false, result }
+      }
+    },
+    async complete(source, result) {
+      const state = await load(source)
+      if (!state) fail()
+      result = checkedResult(result, state.record)
+      const path = join(root, `${hash(source)}.result.json`)
+      try { await writeExclusive(path, { schema: 1, version, sourceSessionId: source, result }) }
+      catch (error) { if (error.code !== 'EEXIST') throw error }
+      const completed = await receipt(source, state)
+      if (!completed || resultKeys.some(key => completed[key] !== result[key])) fail()
+      return completed
+    },
+    async read(source) {
+      id(source)
+      const state = await load(source)
+      if (!await folder()) return null
+      return await receipt(source, state) ?? (state ? unknown(state.record) : null)
+    },
+    async pending() {
+      if (!await folder()) return []
+      const requests = []
+      for (const name of (await readdir(root)).filter(name => name.endsWith('.pending.json')).sort()) {
+        const value = await readJson(join(root, name))
+        if (!value || name !== `${hash(value.sourceSessionId)}.pending.json`) fail()
+        validate(value, value.sourceSessionId, true)
+        if (!await load(value.sourceSessionId) && value.expiresAt > Date.now()) {
+          requests.push({ sourceSessionId: value.sourceSessionId, record: value.record, expiresAt: value.expiresAt })
+        }
+      }
+      return requests
+    },
+  }
+  return store
+}
+
+export async function prepareOnboarding({ profileDir, version, sourceSessionId, locale }) {
+  id(sourceSessionId)
+  const store = createOnboardingStore({ profileDir, version })
+  const existing = await store.read(sourceSessionId)
+  if (existing) return existing
+  const record = checkedRecord({ targetSessionId: randomUUID(), requestId: randomUUID(), promptId: randomUUID(), locale })
+  const root = join(resolve(profileDir), '.openagent-onboarding', version)
+  for (const path of [dirname(root), root]) {
+    await mkdir(path, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error })
+    await inspect(path, true, true)
+  }
+  const path = join(root, `${hash(sourceSessionId)}.pending.json`)
+  const value = { schema: 1, version, sourceSessionId, record, expiresAt: Date.now() + 30 * 60 * 1000 }
+  try { await writeExclusive(path, value) } catch (error) { if (error.code !== 'EEXIST') throw error }
+  // pending() 验证已有预约格式；不刷新期限、不替换任何已有预约。
+  const requests = await store.pending()
+  const after = await store.read(sourceSessionId)
+  if (after) return after
+  const pending = requests.find(item => item.sourceSessionId === sourceSessionId)
+  if (!pending) return { status: 'unconfirmed', code: 'ONBOARDING_REQUEST_EXPIRED' }
+  return { status: 'pending', request_id: pending.record.requestId, session_id: pending.record.targetSessionId, expires_at: pending.expiresAt }
+}
+
+async function main() {
+  const options = {}
+  const args = process.argv.slice(2)
+  for (let i = 0; i < args.length; i++) {
+    const key = args[i]
+    if (key === '--prepare' && !options.prepare) options.prepare = true
+    else if (['--profile', '--locale', '--session-id'].includes(key) && !(key in options) && args[i + 1] !== undefined) options[key] = args[++i]
+    else fail()
+  }
+  const profileName = options['--profile']
+  if (!options.prepare || typeof profileName !== 'string' || !profileName || ['.', '..', 'node_modules'].includes(profileName)
+    || /[/\\\x00-\x1f]/.test(profileName)) fail()
+  const sourceSessionId = process.env.DSH_SESSION_ID || options['--session-id']
+  if (process.env.DSH_SESSION_ID && options['--session-id'] && process.env.DSH_SESSION_ID !== options['--session-id']) fail()
+  id(sourceSessionId)
+  const home = resolve(process.env.DSH_HOME?.trim() ? process.env.DSH_HOME : join(homedir(), '.dsh'))
+  const profileDir = join(home, 'profiles', profileName)
+  for (const path of [home, join(home, 'profiles'), profileDir, join(profileDir, 'node_modules')]) {
+    await inspect(path, true)
+    if (await realpath(path) !== path) fail()
+  }
+  const manifest = await readJson(join(profileDir, 'package.json'), false)
+  if (!object(manifest)) fail()
+  const sources = ['dependencies', 'devDependencies', 'optionalDependencies'].flatMap(key => {
+    const dependencies = manifest[key] ?? {}
+    if (!object(dependencies)) fail()
+    return 'dsh-openagent' in dependencies ? [dependencies['dsh-openagent']] : []
+  })
+  const official = new Set(['github:openagent-org/deepseek-harness-plugin#rel',
+    ...['git+https://', 'https://'].flatMap(prefix => ['github.com', 'gitee.com'].map(host => `${prefix}${host}/openagent-org/deepseek-harness-plugin.git#rel`))])
+  if (!sources.length || sources.some(source => !official.has(source))) fail()
+  const installed = await realpath(join(profileDir, 'node_modules', 'dsh-openagent'))
+  if (!installed.startsWith(join(profileDir, 'node_modules') + sep) || installed !== dirname(fileURLToPath(import.meta.url))) fail()
+  const packageJson = await readJson(join(installed, 'package.json'), false)
+  if (packageJson?.name !== 'dsh-openagent' || !versionOk(packageJson.version)) fail()
+  const result = await prepareOnboarding({ profileDir, version: packageJson.version, sourceSessionId, locale: options['--locale'] ?? 'zh-CN' })
+  console.log(`${result.status === 'pending' ? 'OPENAGENT_ONBOARDING_PREPARED' : 'OPENAGENT_ONBOARDING_STATE'} ${JSON.stringify(result)}`)
+}
+
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => '') === fileURLToPath(import.meta.url)) {
+  await main().catch(() => { console.error('OpenAgent 自动验收预约未完成：来源、状态或文件权限无法核实；未发送消息，也未重启客户端。'); process.exitCode = 1 })
+}

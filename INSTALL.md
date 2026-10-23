@@ -56,15 +56,41 @@ node "${DSH_HOME:-$HOME/.dsh}/profiles/web/node_modules/dsh-openagent/login.mjs"
 
 OAuth 桥接器负责浏览器打开、回调、换码和刷新。不要打印认证文件、完整授权 URL 或原始日志，不另外打开授权 URL，不读取其他客户端 Token。登录的总等待有上限；取消、拒绝、失败、超时或结果未知时保留现场并停止，不自动重试。
 
-只有同一进程成功结束且输出 `OPENAGENT_LOGIN_CONNECTED`，才能说明“OpenAgent 登录连接已通过”；此时尚未完成账号或 Agent 业务验收。之后在插件页面启用 `dsh-openagent`，或正常启动已停止的目标客户端。插件页面返回 `applied` 或显示实际已启用只证明插件配置已应用，不能证明 MCP、Skills 或账号可用；`restart-required` 只表示保存成功，仍需由用户在无活动任务时正常退出并重新打开目标客户端。进程重新出现不能替代第 4 步验收。
+只有同一进程成功结束且输出 `OPENAGENT_LOGIN_CONNECTED`，才能说明“OpenAgent 登录连接已通过”；此时尚未完成账号或 Agent 业务验收。之后在插件页面启用 `dsh-openagent`，或正常启动已停止的目标客户端。插件页面返回 `applied` 或显示实际已启用只证明插件配置已应用，不能证明 MCP、Skills 或账号可用。当前客户端已能使用插件工具和 Skills 时，直接执行第 4 步，不退出、不重启。只有原生页面明确返回 `restart-required`、连接确需重载且当前不能应用时，才使用下方预约流程。进程重新出现仍不能替代验收。
+
+### 原生页面要求重开时：先预约，再正常退出
+
+仅在原生页面明确返回 `restart-required`，且本安装会话尚未调用 `openagent_install_verify`、创建验收对话或发送引导时，安装 Agent 才运行一次预约。命令在原安装会话的 Harness shell 中执行，使用宿主注入的 `DSH_PROFILE`、`DSH_PROFILE_DIR` 和 `DSH_SESSION_ID`；先核对前两者与第 1 步一致。默认 Desktop 应是 `desktop`，默认 Web 应是 `web`，其他 profile 保留实际名称。缺少可信会话标识时报告待完成，不能编造 ID 或复制其他会话的值。
+
+Bash：
+
+```bash
+: "${DSH_PROFILE:?未取得当前 profile}" "${DSH_PROFILE_DIR:?未取得当前 profile 路径}" "${DSH_SESSION_ID:?未取得当前会话标识}"
+node "$DSH_PROFILE_DIR/node_modules/dsh-openagent/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale zh-CN
+```
+
+PowerShell：
+
+```powershell
+if (-not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw '未取得当前 Harness profile 或会话标识' }
+node (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
+```
+
+只有命令成功结束并输出 `OPENAGENT_ONBOARDING_PREPARED`，才能报告预约已保存。预约只写入本 profile 的一次性状态，不退出应用、不发送消息，也不证明验收通过。安装 Agent 随即结束本轮；用户在所有任务结束后正常退出并重开目标客户端，在预约创建后 30 分钟内回到原安装会话并保持该会话唯一可见。插件在原会话空闲、MCP 与 Skills 可用后自动创建新对话并发送一次引导，无需用户再发提示，也不要再调用 verify。不能强制结束进程或自行编写后台重启脚本。
+
+预约不续期、不自动重试；重复命令只返回原预约或已有状态，不能当作新许可。输出 `OPENAGENT_ONBOARDING_STATE`、失败、过期或结果未知时保留状态并报告实际阶段，不换会话、删除状态或手动补发。已发起验收的状态只按第 4 步查询一次。
 
 首次单独登录用于避免把交互授权等待放进约 60 秒的 MCP 初始化和短命 stdio 探测阶段；正常连接仍会执行 stdio 探测。初始化阶段若桥接器已发起浏览器授权，等待同一次尝试，不能同时再运行登录入口。已连接后的会话检查只允许静默刷新已有凭据；需要重新授权时明确报错并停止，待用户授权后按登录恢复流程处理。插件关闭宿主自动重连；断线和未知结果不得自动重放业务调用。
 
-桥接器在发送新请求前使用内部协议 `ping` 检查会话；仅检查明确返回 404 且没有已发送的待决请求时，重建会话后首次发送该请求。这不要求模型另行查询账号或登录。业务请求已经发送后发生断线、404 或结果未知时仍停止，不自动重发。桥接退出后，工具名可能仍可见，但新建对话不会重建连接；结束活动任务后正常退出并重开 Harness，再按第 4 步由用户发起新的验收。
+桥接器在发送新请求前使用内部协议 `ping` 检查会话；仅检查明确返回 404 且没有已发送的待决请求时，重建会话后首次发送该请求。这不要求模型另行查询账号或登录。业务请求已经发送后发生断线、404 或结果未知时仍停止，不自动重发。桥接退出后，工具名可能仍可见，但新建对话不会重建连接；结束活动任务后正常退出并重开 Harness。若已有验收尝试，回到原安装会话只查询一次 status；已有有效预约时等待原预约继续，不能重新发起。只有明确尚未发起且没有预约时，才按第 4 步执行首次验收。
 
 ## 4. 在目标客户端的新对话中验收
 
-安装 Agent 在当前目标客户端创建一次用户可见的新对话并发送“OpenAgent 已安装，打开新用户引导”；使用当前宿主实际提供的创建和发送能力，不猜测工具名称。若宿主没有该能力，只报告有证据的已完成阶段，并明确“新对话验收待完成”，由用户在目标客户端新建对话后发送这句话，不伪造自动跳转成功。
+未预约、尚未发起验收时，安装 Agent 在原安装会话调用一次随包工具 `openagent_install_verify({"locale":"zh-CN"})`。该工具检查当前真实工具目录与五项 Skills，在当前唯一可见的 Desktop / Web 窗口通过 Harness 原生接口创建新对话、切换到该对话，再发送一次固定提示“OpenAgent 已安装，打开新用户引导”。它不修改原会话的输入草稿。MCP 和 Skills 已可用时直接完成这一步，无需重启。第 3 步预约成功的流程由插件自动执行同一验收，不再调用 verify。
+
+工具只在新对话内的实际验收完成后返回 `status="completed"`，并同时确认 `guide_loaded=true`、`guide_success=true`、`account_success=true`、`turn_completed=true`。新对话创建、页面切换或消息提交都不是安装验收成功。单次验收最多等待 600 秒，预约验收还受原 30 分钟期限限制。原安装会话若等待超时或结果未知，只调用一次只读的 `openagent_install_status({})` 查看已有状态；它不新建对话，也不重发提示。尚未开始的预约不属于已发起状态，status 的 `NO_ATTEMPT` 不能作为另发一次的许可。不要再次调用 verify、换会话绕过一次性记录，或手动补发同一提示。
+
+只有工具明确确认尚未发起、没有预约，且当前客户端确实没有可见新对话能力（例如 CLI）时，才保留“新对话验收待完成”，由用户在目标客户端手动创建对话并发送上述固定提示。已经预约、创建、发送或状态未知时，保留原验收会话和错误，不再创建第二个对话。缺少安装验收工具时同样报告待完成，不能猜测工具名或以后台 CLI 子会话代替。
 
 确认新对话能发现以下五个 Skills，并能通过原生 `skill` 工具加载：
 
@@ -108,7 +134,7 @@ dsh plugin --profile <profile> remove dsh-openagent
 dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'
 ```
 
-保留 `DSH_HOME/openagent-auth`，不要清空认证或重复登录已成功的连接。移除或重新安装失败、取消或结果未知时停止，不自动重放整个更新流程；网络换源仍只限第 2 步允许的失败下载阶段。安装成功后核对实际安装的来源和版本，再启用或重启目标客户端，按第 4 步在新对话验收；不能只凭包安装成功报告更新验收通过。
+保留 `DSH_HOME/openagent-auth`，不要清空认证或重复登录已成功的连接。移除或重新安装失败、取消或结果未知时停止，不自动重放整个更新流程；网络换源仍只限第 2 步允许的失败下载阶段。安装成功后核对实际安装的来源和版本，启用插件或正常启动已停止的目标客户端；已可用时无需额外重启，按第 4 步在新对话验收；不能只凭包安装成功报告更新验收通过。
 
 ### 卸载
 

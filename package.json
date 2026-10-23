@@ -1,11 +1,11 @@
 {
   "name": "dsh-openagent",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
   "type": "module",
   "main": "index.js",
   "exports": { ".": "./index.js", "./client": "./client.js" },
-  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "client.js", "uninstall.py", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
+  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "onboarding-host.mjs", "onboarding-protocol.mjs", "onboarding-client.mjs", "post-install.mjs", "client.js", "uninstall.py", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.1-rc.2 <0.3.0"
@@ -14,7 +14,7 @@
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-ui-sidebar-right"],
+      "inject": ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-ui-sidebar-right", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-conversation"],
       "external": []
     }
   },
