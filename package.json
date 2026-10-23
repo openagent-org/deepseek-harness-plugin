@@ -1,0 +1,33 @@
+{
+  "name": "dsh-openagent",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js" },
+  "files": ["index.js", "login.mjs", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": { "mcp-remote": "0.1.38" },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@modelcontextprotocol/sdk": "1.26.0"
+  },
+  "scripts": {
+    "check": "python3 -B -m unittest discover -s tests -p 'test_*.py' && node --test tests/test_runtime.mjs",
+    "deploy": "python3 -B scripts/deploy.py",
+    "deploy:push": "python3 -B scripts/deploy.py --push"
+  }
+}
