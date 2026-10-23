@@ -67,7 +67,8 @@ export function validateHandoffUrl(value) {
   if (typeof value !== 'string' || value.length > 16384) throw new Error('OPENAGENT_BROWSER_INVALID_HANDOFF')
   let parsed
   try { parsed = new URL(value) } catch { throw new Error('OPENAGENT_BROWSER_INVALID_HANDOFF') }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || parsed.pathname !== '/openagent/agents') {
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash
+    || !['/browser/handoff', '/openagent/agents'].includes(parsed.pathname)) {
     throw new Error('OPENAGENT_BROWSER_INVALID_HANDOFF')
   }
   return value
