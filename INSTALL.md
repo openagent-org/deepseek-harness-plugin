@@ -110,10 +110,32 @@ dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepsee
 
 保留 `DSH_HOME/openagent-auth`，不要清空认证或重复登录已成功的连接。移除或重新安装失败、取消或结果未知时停止，不自动重放整个更新流程；网络换源仍只限第 2 步允许的失败下载阶段。安装成功后核对实际安装的来源和版本，再启用或重启目标客户端，按第 4 步在新对话验收；不能只凭包安装成功报告更新验收通过。
 
-卸载使用插件页面移除 `dsh-openagent`，或在目标 profile 未运行时执行：
+### 卸载
+
+先结束正在使用 OpenAgent 的任务并停止目标 profile。Desktop 必须通过应用正常退出；不要从将被关闭的 Desktop 聊天中卸载，也不要强制结束进程。以下一行入口在独立的外部 Bash 终端执行，需要 curl 和 Python 3.9+：
+
+```bash
+bash -o pipefail -c 'curl -fsSL --proto "=https" --proto-redir "=https" https://raw.githubusercontent.com/openagent-org/deepseek-harness-plugin/rel/uninstall.py | python3 - --yes'
+```
+
+脚本仅接受 GitHub/Gitee 上 `openagent-org/deepseek-harness-plugin` 的 `rel` 依赖来源，并通过 Harness 原生包管理移除 `dsh-openagent`，不直接删除 profile、其他插件或配置；同名非官方来源或无法确认归属的残留均停止。将命令末尾的 `--yes` 替换为 `--dry-run` 可只读预览；其他参数同样添加在 `python3 -` 之后：
+
+| 参数 | 用途 |
+| --- | --- |
+| `--yes` | 按已核对的目标执行卸载，跳过交互确认。 |
+| `--dry-run` | 只读检查并显示计划，不执行卸载。 |
+| `--profile <名称>` | 指定原安装的 profile。未指定时只自动选择唯一的官方安装；发现多个安装时停止，必须明确指定。 |
+| `--dsh-home <路径>` | 指定自定义 Harness 主目录；须与原安装一致。未指定时读取非空 `DSH_HOME`，否则使用 `~/.dsh`。 |
+| `--desktop-app <路径>` | 指定 macOS 的 `.app` 目录或 Windows 的应用安装根目录，用于定位 Desktop 内置 dsh。 |
+
+macOS Desktop 默认检查 `/Applications/DeepSeek Harness.app` 和 `~/Applications/DeepSeek Harness.app`；Windows Desktop 默认使用 PATH 中已注册且指向应用内置 CLI 的 dsh 入口。无法唯一定位时使用 `--desktop-app`，不能用 npm 另装的 dsh 代替。脚本不支持 Linux Desktop，须改用原生插件页面；Web 和 CLI 使用 PATH 中已有的 dsh。
+
+实际卸载前，脚本检查目标 profile 是否已停止；检测到运行中的目标 Harness、无法归属 profile 的 Harness 进程、运行状态无法核实或包管理锁时均停止，不终止进程或清理锁。`--dry-run` 只读提示这些待处理项，不调用原生卸载命令。下载、检查或原生命令失败、取消或结果未知时停止，保留错误，不自动换源、重复执行或改为手删文件。
+
+也可在当前 profile 的插件页面移除 `dsh-openagent`，或在目标 profile 未运行时，从外部终端使用原生命令：
 
 ```bash
 dsh plugin --profile <profile> remove dsh-openagent
 ```
 
-Desktop 仍须使用其内置 dsh，且应用已完全退出。确认原生 bundle 和工具从目标 profile 移除；包内 Skills 随插件停用。共享的 `DSH_HOME/openagent-auth` 专用认证目录保留，避免破坏其他已安装本插件的 profile；本地卸载不等于服务端撤销授权。需要彻底退出账号时，先确认所有使用该目录的 profile 均已停止，再由用户明确授权处理该专用认证目录及服务端授权；禁止删除整个 `DSH_HOME` 或其他客户端的凭据。
+手动命令须保持原安装的 `DSH_HOME`；Desktop 仍须使用其内置 dsh，且应用已完全退出。确认原生 bundle 和工具从目标 profile 移除；包内 Skills 随插件停用。共享的 `DSH_HOME/openagent-auth` 专用认证目录保留，避免破坏其他已安装本插件的 profile；本地卸载不等于服务端撤销授权。需要彻底退出账号时，先确认所有使用该目录的 profile 均已停止，再由用户明确授权处理该专用认证目录及服务端授权；禁止删除整个 `DSH_HOME` 或其他客户端的凭据。

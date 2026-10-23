@@ -1,11 +1,11 @@
 {
   "name": "dsh-openagent",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
   "type": "module",
   "main": "index.js",
   "exports": { ".": "./index.js", "./client": "./client.js" },
-  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "client.js", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
+  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "client.js", "uninstall.py", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.1-rc.2 <0.3.0"

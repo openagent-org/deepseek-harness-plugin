@@ -110,10 +110,32 @@ dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepsee
 
 Keep `DSH_HOME/openagent-auth`; do not clear authentication or sign in again when the connection has already succeeded. If removal or reinstallation fails, is cancelled, or has an unknown result, stop without automatically replaying the entire update process. Switching sources remains limited to the failed download stages allowed in step 2. After installation succeeds, check the actual installed source and version, then enable or restart the target client and verify in a new conversation as described in step 4. Package installation success alone does not establish that update verification passed.
 
-To uninstall, remove `dsh-openagent` from the plugin page, or run the following while the target profile is not running:
+### Uninstall
+
+Finish any tasks using OpenAgent and stop the target profile. For Desktop, quit the application normally; do not uninstall from the Desktop conversation that will be closed or force-kill its processes. Run this one-line entry in a separate external Bash terminal. It requires curl and Python 3.9+:
+
+```bash
+bash -o pipefail -c 'curl -fsSL --proto "=https" --proto-redir "=https" https://raw.githubusercontent.com/openagent-org/deepseek-harness-plugin/rel/uninstall.py | python3 - --yes'
+```
+
+The script accepts only `rel` dependency sources for `openagent-org/deepseek-harness-plugin` on GitHub or Gitee and removes `dsh-openagent` through Harness's native package manager. It does not directly delete profiles, other plugins, or configuration; unofficial packages with the same name or residues with unverified ownership cause it to stop. Replace the final `--yes` with `--dry-run` for a read-only preview; add other arguments after `python3 -` as well:
+
+| Argument | Purpose |
+| --- | --- |
+| `--yes` | Uninstall the verified target without an interactive confirmation. |
+| `--dry-run` | Inspect and display the plan without uninstalling. |
+| `--profile <name>` | Select the original installation profile. If omitted, select only a single verified official installation; multiple installations require an explicit profile. |
+| `--dsh-home <path>` | Select a custom Harness home matching the original installation. If omitted, use a non-empty `DSH_HOME`, otherwise `~/.dsh`. |
+| `--desktop-app <path>` | Specify the macOS `.app` directory or Windows application installation root to locate Desktop's bundled dsh. |
+
+For macOS Desktop, automatic discovery checks `/Applications/DeepSeek Harness.app` and `~/Applications/DeepSeek Harness.app`. For Windows Desktop, it uses an existing dsh entry on PATH that points to the application's bundled CLI. Use `--desktop-app` if discovery cannot identify exactly one installation; do not substitute an npm-installed dsh. The script does not support Linux Desktop; use the native plugin page instead. Web and CLI use the existing dsh on PATH.
+
+Before uninstalling, the script checks that the target profile is stopped. It stops on a running target Harness, a Harness process whose profile cannot be determined, an unverifiable process state, or a package-management lock, without terminating processes or clearing locks. `--dry-run` reports these prerequisites read-only without invoking native uninstallation. Stop on a failed download, check, or native command, cancellation, or unknown result. Keep the error; do not automatically switch sources, repeat execution, or delete files manually as a fallback.
+
+Alternatively, remove `dsh-openagent` from the target profile's plugin page, or use the native command in an external terminal while the target profile is not running:
 
 ```bash
 dsh plugin --profile <profile> remove dsh-openagent
 ```
 
-For Desktop, continue to use its bundled dsh and fully quit the application first. Confirm that the native bundle and tools have been removed from the target profile; the packaged Skills are disabled with the plugin. Keep the shared, dedicated authentication directory `DSH_HOME/openagent-auth` to avoid disrupting other profiles with this plugin installed. Local uninstallation does not revoke server-side authorization. To sign out completely, first confirm that all profiles using this directory have stopped, then obtain the user's explicit authorization to handle this dedicated authentication directory and the server-side authorization. Never delete the entire `DSH_HOME` or another client's credentials.
+Keep the original `DSH_HOME` for the manual command. For Desktop, continue to use its bundled dsh and fully quit the application first. Confirm that the native bundle and tools have been removed from the target profile; the packaged Skills are disabled with the plugin. Keep the shared, dedicated authentication directory `DSH_HOME/openagent-auth` to avoid disrupting other profiles with this plugin installed. Local uninstallation does not revoke server-side authorization. To sign out completely, first confirm that all profiles using this directory have stopped, then obtain the user's explicit authorization to handle this dedicated authentication directory and the server-side authorization. Never delete the entire `DSH_HOME` or another client's credentials.
