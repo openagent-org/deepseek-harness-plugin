@@ -1,169 +1,162 @@
 # 安装 OpenAgent：DeepSeek Harness
 
-将本指南交给 DeepSeek Harness，并说“请按这份指南安装 OpenAgent”。安装到当前正在使用的 Harness 主目录和 profile；用户只在授权页面完成登录，不需要向 Agent 提供密码或 Token。
+由 DeepSeek Harness 的安装 Agent 实际执行以下四步，完成安装、登录和新对话验收，不要只把命令交给用户。建议在新对话选择“创造 / Creator”模式后交付本指南；当前会话已提供 `plugin_manager` 时直接继续。用户处理必要审批和网页授权，不提供密码或 Token。
 
-本指南核对 DeepSeek Harness `0.2.1-rc.2`，支持 Desktop、Web 和 CLI 的本地运行环境。Harness 仍处于开发预览；本插件声明兼容 `>=0.2.1-rc.2 <0.3.0`。不要把 Hermes 的安装器、配置格式或命令用于 Harness。
+本指南核对 Harness `0.2.1-rc.2`，支持 `>=0.2.1-rc.2 <0.3.0` 的本地 Desktop、Web 和 CLI。插件显示名称为 **OpenAgent**；工具参数和安装路径中的内部包名仍为 `dsh-openagent`。
 
-## 1. 检查环境
+## 1. 确认当前环境和原生工具
 
-确认实际客户端、Harness 版本、当前 `DSH_HOME` 和 profile。未设置 `DSH_HOME` 时通常为 `~/.dsh`；Desktop 使用 `desktop`，Web 默认使用 `web`，CLI 使用启动时选择的 profile。不要读取凭据文件，也不要把桌面安装写进 `web` profile。
+确认当前确实是目标机器上的 DeepSeek Harness，并核对版本。检查当前会话真实提供 `plugin_manager`、当前系统的 `bash` 或 `pwsh`、以及 `job_output`，并确认所用 shell 的实际 schema 支持 `run_in_background: true`；不支持时停止并报告宿主缺少后台执行能力。缺少安装工具时，说明当前模式不能完成自动安装，请用户新建 Creator 对话后再次交付本指南；已有对话不能在首轮后切换预设。不要手改 YAML、关闭审批或从当前聊天另起 `dsh plugin` 命令补装工具。
 
-需要 Git 和 Node.js `22.19+`（22 系列）或 `24+`。Desktop 可以通过原生 `load_workspace_dependencies` 取得其内置 Node 绝对路径；后续命令中的 `node` 指已核对的可执行文件。CLI 安装还需要当前 Harness 的 `dsh` 命令与 pnpm；Desktop 自带的 `dsh` 使用其内置 pnpm。
+通过原生 shell 只核对宿主注入的 `DSH_HOME`、`DSH_PROFILE`、`DSH_PROFILE_DIR` 和 `DSH_SESSION_ID`。后续使用已确认的值；缺失或目标不符时停止，不猜测 profile，不改写变量指向其他 profile，也不读取凭据文件。
 
-Desktop 没有注册 `dsh` 命令时，优先使用下面的原生插件页面。若需使用 CLI，可在应用菜单的“管理 dsh 命令…”安装该命令，再开新终端核对 `dsh --version`。不要用 npm 另装的 dsh 修改 Desktop profile。
+检查 Git 和 Node.js：需要 Node `22.19+`（22 系列）或 `24+`。有 `load_workspace_dependencies` 时使用它返回的 Node 绝对路径，否则使用当前环境已配置并验证过的 Node。后续示例的 `<Node 绝对路径>` 必须替换为该路径并正确引用。无需为 Desktop 另装 dsh。
 
-先确定安装方式：正在运行的 Desktop 只通过真实的原生插件页面安装或启用；当前会话没有操作该页面的能力时，由用户在页面完成操作，不能退回到该会话的终端执行 `dsh plugin`。外部 CLI 方式只适用于目标 profile 已安全停止的情况，不能一边运行 Desktop 一边修改其 profile。
+`plugin_manager` 每次检查 `danger-full-access` 权限：已有该权限时直接执行，否则由宿主请求本次审批；不能给它添加 shell 权限参数，也不修改会话全局权限。登录和预约会写入 Harness 专用目录，执行前核对原生 shell 的实际 schema 支持 `sandbox_permissions: "danger-full-access"` 和 `justification`，首次调用就申请该次操作所需权限。参数缺失、审批拒绝或取消时停止，不换入口重试。
 
-## 2. 安装原生插件包
+## 2. 用原生工具安装，暂不启用
 
-首次下载使用 GitHub：
+先调用 `plugin_manager`：
 
-```text
-git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel
+```json
+{"action":"list_bundles","limit":100}
 ```
 
-仅 Git 仓库下载发生 DNS、连接、超时、传输中断或 HTTP 5xx 失败，且原操作已结束时，允许用下列同名仓库再下载一次：
+解析工具返回的 JSON 字符串。`nextOffset` 非空时继续以该值作为 `offset` 读取，直到找到目标或查完。核对 `name="dsh-openagent"` 的记录及其 `source`、`version`、`installed`、`enabled`；来源必须实际对应以下官方 GitHub 或 Gitee 仓库的 `rel`，不能用 `official` 布尔值判断，它表示 Harness 内建目录归属。
 
-```text
-git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel
+已有该来源的安装时保留并继续；`already-installed` 也先回读确认，不移除重装。仅明确需要更新时按末尾“更新与移除”处理。未知同名来源、文件异常或未确认的本地修改均停止，不覆盖。
+
+尚未安装时，调用一次 `plugin_manager`，明确暂不启用：
+
+```json
+{"action":"install_bundle","target":"git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel","enabled":false}
 ```
 
-权限或审批拒绝、证书错误、401/403/404/429/451、内容校验、依赖安装、启用或 OAuth 失败不换源。npm 依赖下载失败不能靠换 Git 仓库修复。保留原错误，不自动循环安装，不强制覆盖现有未知同名包。
+等待同一次调用结束，再用 `list_bundles` 回读包名、版本和来源。只有安装明确成功且目标包可读，才继续；`failed`、`cancelled`、`overridden` 或未知结果时报告阶段并停止，不重复安装。`restart-required` 先保留状态，完成登录后按第 4 步的预约分支处理。
 
-**Desktop / Web 插件页面：** 打开左侧“插件 / Plugins”，选择“添加插件 / Add plugin”，填写上面的 Git 地址，确认安装包名称为 `dsh-openagent`。等待安装任务结束；先保持未启用状态，完成第 3 步登录后再点“立即启用 / Enable now”。如果已经启用并开始授权，等待现有桥接进程，不再并行启动登录命令。
+仅明确发生 Git 下载的 DNS、连接、超时、传输中断或 HTTP 5xx 错误，且原操作已结束时，允许将 `target` 换为 `git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel` 再下载一次。审批拒绝、证书错误、401/403/404/429/451、校验、依赖构建、启用或 OAuth 失败不换源。返回 `pendingBuilds` 时报告构建脚本审批阻断并停止，不自行添加 `approvedBuilds` 或放开版本兼容检查。
 
-**CLI：** 在外部本地终端运行，`<profile>` 替换为第 1 步确认的名称：
+原生管理器负责当前 profile 的依赖和插件列表。保留其他插件、模型、会话和配置，不删除 profile，不使用 `--from-default-profile`。
 
-```bash
-dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'
+## 3. 登录一次，再原生启用
+
+先判断是否已有同一端点的可信登录成功记录且连接可用；有则跳过重复登录。若已启用的插件正在授权，等待现有尝试，不并行运行登录入口。旧域登录不能代替 `https://openagent.org/mcp/v1/open-agent` 的授权；迁移须经用户明确授权正常登录一次，保留旧认证文件，不复制或改写 Token。
+
+需要登录时，先告知用户：“正在连接 OpenAgent；如打开授权页，请在网页完成授权，我会等待同一进程。”安装 Agent 选择当前系统的一种原生 shell 调用，替换 Node 路径后执行一次。
+
+macOS / Linux 使用 `bash`：
+
+```json
+{
+  "description": "连接 OpenAgent 并等待网页授权",
+  "command": "\"<Node 绝对路径>\" \"$DSH_PROFILE_DIR/node_modules/dsh-openagent/login.mjs\"",
+  "run_in_background": true,
+  "sandbox_permissions": "danger-full-access",
+  "justification": "本次登录需要写入当前 Harness 的 OpenAgent 专用认证目录并完成浏览器授权。"
+}
 ```
 
-为 Desktop 使用 CLI 时，须先启动过 Desktop 以初始化 profile，确认没有活动任务后通过应用正常退出，再从独立的外部终端确认应用已完全退出；仅使用该 Desktop 自带的 dsh 操作 `--profile desktop`，完成第 3 步后重新打开应用。不要从将被关闭的 Desktop 聊天里启动安装或重启流程；禁止强制结束进程或编写后台重启脚本来继续当前聊天。无法确认安全退出时停止在待操作阶段。Web / CLI 同样在目标 profile 停止后安装，并在重新启动前完成登录。
+Windows 使用 `pwsh`：
 
-原生包管理器维护依赖和 bundle 列表。保留其他插件、模型、会话和用户 patch；禁止通过 `--from-default-profile`、删除 profile、手改全局 YAML 或禁用审批来完成安装。已安装同名包时先核对来源和本地修改；只处理确认属于上述官方仓库的安装。
-
-## 3. 完成一次登录，再启用连接
-
-Harness 当前内置 MCP 客户端没有原生 OAuth 配置。本插件使用固定版本 `mcp-remote@0.1.38` 连接 OpenAgent，并把认证状态独立保存在当前 `DSH_HOME/openagent-auth`。它不复用 Hermes、Codex 或其他客户端的登录。
-
-从旧官网域名升级到本版本时，先核对实际安装包的 `login.mjs` 端点为 `https://openagent.org/mcp/v1/open-agent`，再由用户明确授权，按本节正常执行一次登录。新域使用新的 OAuth issuer/resource，旧域登录成功不能代替新域授权。保留原认证文件；不复制旧 Token、不改写其 resource，也不把旧认证文件改名成新域的记录。桥接器按完整端点分别保存认证。
-
-在安装后的包目录运行一次登录入口。下面以默认主目录的 Web profile 为例；Desktop 改为 `desktop`，其他 profile 使用实际名称。自定义 `DSH_HOME` 必须与目标 Harness 完全相同。Windows 使用相应的用户主目录与路径写法。
-
-```bash
-node "${DSH_HOME:-$HOME/.dsh}/profiles/web/node_modules/dsh-openagent/login.mjs"
+```json
+{
+  "description": "连接 OpenAgent 并等待网页授权",
+  "command": "& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/login.mjs')",
+  "run_in_background": true,
+  "sandbox_permissions": "danger-full-access",
+  "justification": "本次登录需要写入当前 Harness 的 OpenAgent 专用认证目录并完成浏览器授权。"
+}
 ```
 
-先告知用户“正在连接 OpenAgent；如打开授权页，请在网页完成授权，我会等待同一进程。”使用宿主真实支持的后台执行和等待工具，保留进程标识，每次最多等待 60 秒并继续同一进程。不要套用 Hermes 的 `terminal` 参数，不要因为工具暂时返回就重跑命令。
+记住返回的真实 `jobId`，使用 `job_output` 等待同一个任务，每次最多 60 秒：
 
-OAuth 桥接器负责浏览器打开、回调、换码和刷新。不要打印认证文件、完整授权 URL 或原始日志，不另外打开授权 URL，不读取其他客户端 Token。登录的总等待有上限；取消、拒绝、失败、超时或结果未知时保留现场并停止，不自动重试。
+```json
+{"job_id":"<上一步的 jobId>","wait":true,"timeout_ms":60000}
+```
 
-只有同一进程成功结束且输出 `OPENAGENT_LOGIN_CONNECTED`，才能说明“OpenAgent 登录连接已通过”；此时尚未完成账号或 Agent 业务验收。之后在插件页面启用 `dsh-openagent`，或正常启动已停止的目标客户端。插件页面返回 `applied` 或显示实际已启用只证明插件配置已应用，不能证明 MCP、Skills 或账号可用。当前客户端已能使用插件工具和 Skills 时，直接执行第 4 步，不退出、不重启。只有原生页面明确返回 `restart-required`、连接确需重载且当前不能应用时，才使用下方预约流程。进程重新出现仍不能替代验收。
+短等待结束不代表登录失败；任务仍运行时继续等待原任务，不重跑命令。只有原命令退出码为 0 且输出 `OPENAGENT_LOGIN_CONNECTED`，才确认登录连接通过。取消、失败、超时或未知结果时停止，报告阶段和公开错误。授权页由登录入口打开，不另外补开 URL，不打印认证文件、完整授权地址或原始日志。
 
-### 原生页面要求重开时：先预约，再正常退出
+登录通过后，调用 `plugin_manager`：
 
-仅在原生页面明确返回 `restart-required`，且本安装会话尚未调用 `openagent_install_verify`、创建验收对话或发送引导时，安装 Agent 才运行一次预约。命令在原安装会话的 Harness shell 中执行，使用宿主注入的 `DSH_PROFILE`、`DSH_PROFILE_DIR` 和 `DSH_SESSION_ID`；先核对前两者与第 1 步一致。默认 Desktop 应是 `desktop`，默认 Web 应是 `web`，其他 profile 保留实际名称。缺少可信会话标识时报告待完成，不能编造 ID 或复制其他会话的值。
+```json
+{"action":"set_bundle","target":"dsh-openagent","enabled":true}
+```
+
+回读目标包和实际工具目录。`application="applied"` 只证明配置已应用；MCP 工具与 Skills 已可用时直接进入第 4 步，不退出、不重启。明确返回 `restart-required` 时进入下方预约分支。其余失败或未知结果停止，不把“已启用”当作验收成功，也不靠再次登录排查工具缺失。
+
+## 4. 自动打开新对话验收并交付
+
+没有预约且尚未发起验收时，安装 Agent 在原安装会话调用一次 `openagent_install_verify`：
+
+```json
+{"locale":"zh-CN"}
+```
+
+保持目标 Desktop / Web 的原安装会话在唯一可见窗口中。工具会检查真实 MCP 工具和五项业务 Skills，自动创建并显示新对话，发送一次“OpenAgent 已安装，打开新用户引导”，保留原会话草稿。不要另外创建会话、手动补发提示或要求用户重复发送。
+
+仅当 `status="completed"`，且 `guide_loaded`、`guide_success`、`account_success`、`turn_completed` 均严格为 `true`，才报告“OpenAgent 安装及账号验证通过，可以在新对话继续使用”。这要求新对话实际加载引导 Skill、引导返回 `view=onboarding/status=ready`、一次账号调用返回严格的 `success=true`，并正常结束该轮。工具列表、OAuth 成功或模型正文不能替代。
+
+单次验收最多等待 600 秒。原调用超时或结果未知时，只调用一次只读 `openagent_install_status`：
+
+```json
+{}
+```
+
+按已有状态报告结果，不再调用 verify，不换会话绕过记录。`NO_ATTEMPT` 不能覆盖尚未开始的预约，也不是补发许可。失败时报告“OpenAgent 安装验收未完成”、阶段和公开错误，不重复引导、账号调用或 OAuth，不读取 Token、直连 MCP 或删除状态绕过验收。
+
+### 仅在原生管理结果明确要求重开时预约
+
+仅当结果明确为 `restart-required`，且没有预约、尚未调用 verify 或创建验收对话时，在原安装会话执行一次以下预约命令。使用第 1 步核对的 Node 和宿主注入变量；原生 `bash` / `pwsh` 调用请求本次 `sandbox_permissions: "danger-full-access"`，`justification` 说明“为当前安装会话保存一次性的新对话验收预约”。短时执行并等待退出，不关闭应用。
 
 Bash：
 
 ```bash
 : "${DSH_PROFILE:?未取得当前 profile}" "${DSH_PROFILE_DIR:?未取得当前 profile 路径}" "${DSH_SESSION_ID:?未取得当前会话标识}"
-node "$DSH_PROFILE_DIR/node_modules/dsh-openagent/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale zh-CN
+"<Node 绝对路径>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale zh-CN
 ```
 
 PowerShell：
 
 ```powershell
 if (-not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw '未取得当前 Harness profile 或会话标识' }
-node (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
+& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
 ```
 
-只有命令成功结束并输出 `OPENAGENT_ONBOARDING_PREPARED`，才能报告预约已保存。预约只写入本 profile 的一次性状态，不退出应用、不发送消息，也不证明验收通过。安装 Agent 随即结束本轮；用户在所有任务结束后正常退出并重开目标客户端，在预约创建后 30 分钟内回到原安装会话并保持该会话唯一可见。插件在原会话空闲、MCP 与 Skills 可用后自动创建新对话并发送一次引导，无需用户再发提示，也不要再调用 verify。不能强制结束进程或自行编写后台重启脚本。
+仅命令成功结束并输出 `OPENAGENT_ONBOARDING_PREPARED` 时报告：“安装文件已就绪，自动验收已预约。请在所有任务结束后正常退出并重开 Harness，30 分钟内回到本安装会话。”随即结束本轮。原会话空闲且唯一可见、MCP 与 Skills 可用后，插件自动完成上述验收，无需用户发提示，也不再调用 verify。禁止强制结束进程或编写后台重启脚本。
 
-预约不续期、不自动重试；重复命令只返回原预约或已有状态，不能当作新许可。输出 `OPENAGENT_ONBOARDING_STATE`、失败、过期或结果未知时保留状态并报告实际阶段，不换会话、删除状态或手动补发。已发起验收的状态只按第 4 步查询一次。
+预约失败、过期、输出 `OPENAGENT_ONBOARDING_STATE` 或未知结果时保留原状态，报告实际阶段；不续期、删除记录、换会话或手动补发。已经发起的验收只按上文查询一次 status。
 
-首次单独登录用于避免把交互授权等待放进约 60 秒的 MCP 初始化和短命 stdio 探测阶段；正常连接仍会执行 stdio 探测。初始化阶段若桥接器已发起浏览器授权，等待同一次尝试，不能同时再运行登录入口。已连接后的会话检查只允许静默刷新已有凭据；需要重新授权时明确报错并停止，待用户授权后按登录恢复流程处理。插件关闭宿主自动重连；断线和未知结果不得自动重放业务调用。
-
-桥接器在发送新请求前使用内部协议 `ping` 检查会话；仅检查明确返回 404 且没有已发送的待决请求时，重建会话后首次发送该请求。这不要求模型另行查询账号或登录。业务请求已经发送后发生断线、404 或结果未知时仍停止，不自动重发。桥接退出后，工具名可能仍可见，但新建对话不会重建连接；结束活动任务后正常退出并重开 Harness。若已有验收尝试，回到原安装会话只查询一次 status；已有有效预约时等待原预约继续，不能重新发起。只有明确尚未发起且没有预约时，才按第 4 步执行首次验收。
-
-## 4. 在目标客户端的新对话中验收
-
-未预约、尚未发起验收时，安装 Agent 在原安装会话调用一次随包工具 `openagent_install_verify({"locale":"zh-CN"})`。该工具检查当前真实工具目录与五项 Skills，在当前唯一可见的 Desktop / Web 窗口通过 Harness 原生接口创建新对话、切换到该对话，再发送一次固定提示“OpenAgent 已安装，打开新用户引导”。它不修改原会话的输入草稿。MCP 和 Skills 已可用时直接完成这一步，无需重启。第 3 步预约成功的流程由插件自动执行同一验收，不再调用 verify。
-
-工具只在新对话内的实际验收完成后返回 `status="completed"`，并同时确认 `guide_loaded=true`、`guide_success=true`、`account_success=true`、`turn_completed=true`。新对话创建、页面切换或消息提交都不是安装验收成功。单次验收最多等待 600 秒，预约验收还受原 30 分钟期限限制。原安装会话若等待超时或结果未知，只调用一次只读的 `openagent_install_status({})` 查看已有状态；它不新建对话，也不重发提示。尚未开始的预约不属于已发起状态，status 的 `NO_ATTEMPT` 不能作为另发一次的许可。不要再次调用 verify、换会话绕过一次性记录，或手动补发同一提示。
-
-只有工具明确确认尚未发起、没有预约，且当前客户端确实没有可见新对话能力（例如 CLI）时，才保留“新对话验收待完成”，由用户在目标客户端手动创建对话并发送上述固定提示。已经预约、创建、发送或状态未知时，保留原验收会话和错误，不再创建第二个对话。缺少安装验收工具时同样报告待完成，不能猜测工具名或以后台 CLI 子会话代替。
-
-确认新对话能发现以下五个 Skills，并能通过原生 `skill` 工具加载：
-
-- `openagent-first-task-router`
-- `openagent-guide-agent`
-- `openagent-search-agent`
-- `openagent-run-agent`
-- `openagent-query-account`
-
-确认新对话的连接实际暴露 `mcp__openagent__` 前缀的 OpenAgent 工具，且能通过原生 `skill` 工具加载引导 Skill；不能用磁盘文件或旧对话的工具列表替代。
-
-验收须读取新对话内真实的引导及 `openagent_account_credits` 调用结果：引导调用正常完成并返回 `view=onboarding`、`status=ready`；随后一次账号查询正常完成且返回严格的 `success=true`，该轮也正常结束，才报告“OpenAgent 安装及账号验证通过”。工具列表、OAuth 成功、配置文件存在或模型说“安装成功”都不能替代。动画不可显示时不声称已播放；这与引导工具调用失败是不同结果。CLI 子会话不能代替 Desktop / Web 可见新对话。
-
-工具缺失、引导或账号调用失败、结果不完整或状态未知时，报告“OpenAgent 安装验收未完成”、失败阶段和可公开的错误信息，停止固定成功文案。不要重发提示、重复账号调用或 OAuth；工具缺失或网络错误本身不代表需要重新登录。禁止读取 Token、用 curl 或自制客户端直连 MCP、修改 profile 或自制重启来绕过验收。后续恢复须针对已确认的失败阶段，由用户重新授权。
-
-引导与账号查询不提交付费 Agent 任务，但使用模型会产生正常模型调用。搜索或选择 Agent 不等于授权执行；实际任务继续遵循已安装 Skills 的授权、上传、等待和结果验证规则。
-
-## 配置与能力范围
-
-- MCP：`https://openagent.org/mcp/v1/open-agent`，Streamable HTTP，由 stdio OAuth 桥接器接入。
-- 请求头：`X-OASN-MCP-OAuth: required`、`X-OASN-MCP-Content-Mode: text-compatible`；不把 Bearer 写进 profile。
-- 工具等待：1800 秒；未知终态不自动重跑。
-- Skills、结果交付 reference、登录说明和 COS 上传 SDK 随包安装，不复制到用户全局 Skill 目录。
-- 上传 SDK 压缩包及解压内容按随包锁定文件校验大小和 SHA-256；首次使用在执行 Skill 的 `scripts/.cos-sdk` 内生成缓存。该目录需当前用户可写；校验失败立即停止，不另装 SDK 或降级上传。
-- Desktop 的原生侧栏浏览器模块可用、当前会话有唯一可见客户端时，可通过随包 `openagent_browser_open` / `openagent_browser_status` / `openagent_browser_close` 打开、核对和关闭此次选择页面。成功回执只证明侧栏已提交页面，不证明网页内容已加载或用户已选择；超时或未确认时不再次打开。
-- Web 默认未启用侧栏浏览器模块，CLI 没有可见页面；页面能力缺失时保留服务端返回的原始链接，不声称已自动打开。不承诺 MCP Apps 卡片或所有媒体原生渲染；新用户引导动画不使用搜索选择页的浏览器流程。
+缺少验收工具或当前客户端没有可见新对话能力时，保留“新对话验收待完成”。CLI 不得用后台子会话冒充 Desktop / Web 的可见验收；仅明确没有预约且从未发起验收时，才可由用户在目标客户端手动创建对话并发送固定提示。验收使用当前模型，会产生正常模型调用，但不提交付费 Agent 任务；不声称未显示的动画已经播放。
 
 ## 更新与移除
 
-该 Git 安装包没有可用的原生“更新”按钮，重复添加同一 Git 地址也不能作为更新成功依据。更新时，先结束相关任务，核对来源、版本和本地修改，备份需要保留的改动；在目标 profile 停用插件并停止该 profile。Desktop 必须完全退出应用，并在外部本地终端使用该 Desktop 内置的 dsh；其他客户端也使用第 1 步确认的 dsh、`DSH_HOME` 和 profile。
+由具备 `plugin_manager` 的安装 Agent 执行。先结束使用 OpenAgent 的任务，回读来源、版本、`removable` 并检查本地修改；仅处理上述官方 GitHub/Gitee `rel` 安装，备份需要保留的修改。该 Git 包没有可用的原生更新按钮，重复添加相同地址不能作为更新成功依据。
 
-先通过原生命令移除旧包，`<profile>` 使用原安装的 profile：
+移除时调用 `plugin_manager`：
 
-```bash
-dsh plugin --profile <profile> remove dsh-openagent
+```json
+{"action":"remove_bundle","target":"dsh-openagent"}
 ```
 
-只有移除成功后，才在同一主目录、同一 profile 保持停止的状态下重新安装：
+回读实际包与运行状态，确认移除后才报告成功。`restart-required` 表示尚需正常重开后核对运行状态，不重复移除。更新须在移除确认后回到第 2 步安装，再启用并验收；已有有效的同端点登录不重复授权。失败、取消或未知结果时停止，不自动重放流程。
+
+若返回 `stop-profile`，由用户结束任务并正常退出目标客户端，再从独立外部终端处理原 profile。保持原 `DSH_HOME`；Desktop 使用应用内置 dsh，不用 npm 另装版本，也不从将被关闭的聊天运行退出或卸载脚本。确认 profile 已停止后执行：
 
 ```bash
-dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'
+dsh plugin --profile <原 profile> remove dsh-openagent
 ```
 
-保留 `DSH_HOME/openagent-auth`，不要清空认证或重复登录同一新端点已成功的连接；旧域迁移仍须先按第 3 步明确授权并完成一次新域登录。移除或重新安装失败、取消或结果未知时停止，不自动重放整个更新流程；网络换源仍只限第 2 步允许的失败下载阶段。安装成功后核对实际安装的来源和版本，启用插件或正常启动已停止的目标客户端；已可用时无需额外重启，按第 4 步在新对话验收；不能只凭包安装成功报告更新验收通过。
+仅已确认移除、需要重装且 profile 仍停止时，使用 `dsh plugin --profile <原 profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'`。启动前，用已核对的 Node 绝对路径运行该实际 profile 包目录中的 `login.mjs`，按第 3 步的单次登录规则处理；外部终端不假定存在宿主注入变量。重开后继续验收。原生插件页面也能完成安装、启用和移除，作为人工维护入口，不代替具备工具的安装 Agent 执行主流程。
 
-### 卸载
-
-先结束正在使用 OpenAgent 的任务并停止目标 profile。Desktop 必须通过应用正常退出；不要从将被关闭的 Desktop 聊天中卸载，也不要强制结束进程。以下一行入口在独立的外部 Bash 终端执行，需要 curl 和 Python 3.9+：
-
-```bash
-bash -o pipefail -c 'curl -fsSL --proto "=https" --proto-redir "=https" https://raw.githubusercontent.com/openagent-org/deepseek-harness-plugin/rel/uninstall.py | python3 - --yes'
-```
-
-脚本仅接受 GitHub/Gitee 上 `openagent-org/deepseek-harness-plugin` 的 `rel` 依赖来源，并通过 Harness 原生包管理移除 `dsh-openagent`，不直接删除 profile、其他插件或配置；同名非官方来源或无法确认归属的残留均停止。将命令末尾的 `--yes` 替换为 `--dry-run` 可只读预览；其他参数同样添加在 `python3 -` 之后：
+独立外部终端的一行卸载入口见 [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+。脚本要求目标 profile 已停止，只接受上述官方来源，保留其他插件和配置；参数追加在 `python3 -` 后：
 
 | 参数 | 用途 |
 | --- | --- |
-| `--yes` | 按已核对的目标执行卸载，跳过交互确认。 |
-| `--dry-run` | 只读检查并显示计划，不执行卸载。 |
-| `--profile <名称>` | 指定原安装的 profile。未指定时只自动选择唯一的官方安装；发现多个安装时停止，必须明确指定。 |
-| `--dsh-home <路径>` | 指定自定义 Harness 主目录；须与原安装一致。未指定时读取非空 `DSH_HOME`，否则使用 `~/.dsh`。 |
-| `--desktop-app <路径>` | 指定 macOS 的 `.app` 目录或 Windows 的应用安装根目录，用于定位 Desktop 内置 dsh。 |
+| `--yes` / `--dry-run` | 执行已核对的卸载 / 只读预览。 |
+| `--profile <名称>` | 指定原 profile；多个官方安装时必须明确指定。 |
+| `--dsh-home <路径>` | 指定原 Harness 主目录；缺省读取非空 `DSH_HOME`，否则使用 `~/.dsh`。 |
+| `--desktop-app <路径>` | 指定 macOS 的 `.app` 或 Windows 应用安装根目录，以定位内置 dsh。 |
 
-macOS Desktop 默认检查 `/Applications/DeepSeek Harness.app` 和 `~/Applications/DeepSeek Harness.app`；Windows Desktop 默认使用 PATH 中已注册且指向应用内置 CLI 的 dsh 入口。无法唯一定位时使用 `--desktop-app`，不能用 npm 另装的 dsh 代替。脚本不支持 Linux Desktop，须改用原生插件页面；Web 和 CLI 使用 PATH 中已有的 dsh。
+脚本不能核实运行状态或发现包管理锁时停止，不终止进程、不清理锁。macOS 默认检查标准应用目录；Windows 默认使用已注册的内置 dsh；无法唯一定位时用 `--desktop-app`。脚本不支持 Linux Desktop，该场景使用原生管理工具或页面。
 
-实际卸载前，脚本检查目标 profile 是否已停止；检测到运行中的目标 Harness、无法归属 profile 的 Harness 进程、运行状态无法核实或包管理锁时均停止，不终止进程或清理锁。`--dry-run` 只读提示这些待处理项，不调用原生卸载命令。下载、检查或原生命令失败、取消或结果未知时停止，保留错误，不自动换源、重复执行或改为手删文件。
-
-也可在当前 profile 的插件页面移除 `dsh-openagent`，或在目标 profile 未运行时，从外部终端使用原生命令：
-
-```bash
-dsh plugin --profile <profile> remove dsh-openagent
-```
-
-手动命令须保持原安装的 `DSH_HOME`；Desktop 仍须使用其内置 dsh，且应用已完全退出。确认原生 bundle 和工具从目标 profile 移除；包内 Skills 随插件停用。共享的 `DSH_HOME/openagent-auth` 专用认证目录保留，避免破坏其他已安装本插件的 profile；本地卸载不等于服务端撤销授权。需要彻底退出账号时，先确认所有使用该目录的 profile 均已停止，再由用户明确授权处理该专用认证目录及服务端授权；禁止删除整个 `DSH_HOME` 或其他客户端的凭据。
+保留共享的 `DSH_HOME/openagent-auth`；本地卸载不等于撤销服务端授权。彻底退出账号须先确认所有使用该目录的 profile 已停止并取得用户明确授权；禁止删除整个 Harness 主目录或其他客户端凭据。

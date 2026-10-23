@@ -1,11 +1,11 @@
 {
   "name": "dsh-openagent",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
   "type": "module",
   "main": "index.js",
-  "exports": { ".": "./index.js", "./client": "./client.js" },
-  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "onboarding-host.mjs", "onboarding-protocol.mjs", "onboarding-client.mjs", "post-install.mjs", "client.js", "uninstall.py", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
+  "exports": { ".": "./index.js", "./client": "./client.js", "./locale/*.json": "./locale/*.json" },
+  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "onboarding-host.mjs", "onboarding-protocol.mjs", "onboarding-client.mjs", "post-install.mjs", "client.js", "uninstall.py", "cordis.patch.yml", "locale", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.1-rc.2 <0.3.0"
@@ -27,6 +27,7 @@
     "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.2 <0.3.0"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.2",
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.2",
     "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
