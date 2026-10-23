@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { authRuntimeVersion, loadBridgeRuntime, runProxy } from './bridge.mjs'
 
 export const endpoint = 'https://oasn-ow.haimawan.com/mcp/v1/open-agent'
 export const headers = {
@@ -32,7 +33,7 @@ export function prepareAuthDirectory(home = harnessHome()) {
   mkdirSync(home, { recursive: true, mode: 0o700 })
   const directory = join(home, 'openagent-auth')
   privateDirectory(directory)
-  const store = join(directory, 'mcp-remote-0.1.38')
+  const store = join(directory, `mcp-remote-${authRuntimeVersion}`)
   privateDirectory(store)
   for (const entry of readdirSync(store)) {
     const path = join(store, entry)
@@ -54,6 +55,7 @@ async function main() {
   if (mode !== undefined && mode !== '--proxy') throw new Error('用法：node login.mjs')
   if (process.argv.length > 3) throw new Error('不接受额外参数。')
   const proxy = mode === '--proxy'
+  const runtime = await loadBridgeRuntime()
   process.env.MCP_REMOTE_CONFIG_DIR = prepareAuthDirectory()
   // 此文件仅作为独立进程执行时修改 umask，不能改变 Harness Host 的权限策略。
   process.umask(0o077)
@@ -88,12 +90,15 @@ async function main() {
       status(success ? 'OPENAGENT_LOGIN_CONNECTED：OpenAgent 登录连接完成；这不代表工具或业务验收通过。请另行核验 Harness 工具与 Skills。' : 'OpenAgent 登录连接未完成，已停止；不会自动重新执行登录。')
     })
   }
-  await import(pathToFileURL(entry).href)
+  if (proxy) await runProxy(runtime, bridgeArguments(), status)
+  else await import(pathToFileURL(entry).href)
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
-  main().catch(() => {
-    process.stderr.write('OpenAgent 连接启动失败；请检查依赖安装与专用认证目录权限。\n')
+  main().catch(error => {
+    process.stderr.write(error.code === 'OPENAGENT_MCP_CONNECT_FAILED'
+      ? 'OPENAGENT_MCP_CONNECT_FAILED：OpenAgent MCP 连接未完成；请检查网络和登录状态，不会自动重试。\n'
+      : 'OpenAgent 连接启动失败；请检查依赖安装与专用认证目录权限。\n')
     process.exitCode = 1
   })
 }

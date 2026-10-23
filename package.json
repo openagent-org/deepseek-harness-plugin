@@ -1,20 +1,30 @@
 {
   "name": "dsh-openagent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
   "type": "module",
   "main": "index.js",
-  "exports": { ".": "./index.js" },
-  "files": ["index.js", "login.mjs", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
+  "exports": { ".": "./index.js", "./client": "./client.js" },
+  "files": ["index.js", "login.mjs", "bridge.mjs", "browser-host.mjs", "browser-protocol.mjs", "browser-client.mjs", "client.js", "cordis.patch.yml", "skills", "README.md", "INSTALL.md", "INSTALL.en.md"],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.1-rc.2 <0.3.0"
   },
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "dependencies": { "mcp-remote": "0.1.38" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-ui-sidebar-right"],
+      "external": []
+    }
+  },
+  "dependencies": { "mcp-remote": "0.1.38", "@modelcontextprotocol/sdk": "1.26.0" },
   "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-mcp-client": ">=0.2.1-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.1-rc.2 <0.3.0"
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.2 <0.3.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
@@ -23,10 +33,15 @@
     "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
-    "@modelcontextprotocol/sdk": "1.26.0"
+    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-typert-registry": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-api-remote-access": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
   },
   "scripts": {
-    "check": "python3 -B -m unittest discover -s tests -p 'test_*.py' && node --test tests/test_runtime.mjs",
+    "build": "node scripts/build_client.mjs",
+    "check": "python3 -B -m unittest discover -s tests -p 'test_*.py' && node --test tests/test_*.mjs",
     "deploy": "python3 -B scripts/deploy.py",
     "deploy:push": "python3 -B scripts/deploy.py --push"
   }

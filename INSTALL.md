@@ -12,6 +12,8 @@
 
 Desktop 没有注册 `dsh` 命令时，优先使用下面的原生插件页面。若需使用 CLI，可在应用菜单的“管理 dsh 命令…”安装该命令，再开新终端核对 `dsh --version`。不要用 npm 另装的 dsh 修改 Desktop profile。
 
+先确定安装方式：正在运行的 Desktop 只通过真实的原生插件页面安装或启用；当前会话没有操作该页面的能力时，由用户在页面完成操作，不能退回到该会话的终端执行 `dsh plugin`。外部 CLI 方式只适用于目标 profile 已安全停止的情况，不能一边运行 Desktop 一边修改其 profile。
+
 ## 2. 安装原生插件包
 
 首次下载使用 GitHub：
@@ -36,7 +38,7 @@ git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel
 dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'
 ```
 
-为 Desktop 使用 CLI 时，须先启动过 Desktop 以初始化 profile，然后在无活动任务时完全退出应用；仅使用该 Desktop 自带的 dsh 操作 `--profile desktop`，完成第 3 步后重新打开应用。不要从将被关闭的 Desktop 聊天里启动依赖该聊天继续运行的安装命令。Web / CLI 同样在重新启动目标 profile 前完成登录。
+为 Desktop 使用 CLI 时，须先启动过 Desktop 以初始化 profile，确认没有活动任务后通过应用正常退出，再从独立的外部终端确认应用已完全退出；仅使用该 Desktop 自带的 dsh 操作 `--profile desktop`，完成第 3 步后重新打开应用。不要从将被关闭的 Desktop 聊天里启动安装或重启流程；禁止强制结束进程或编写后台重启脚本来继续当前聊天。无法确认安全退出时停止在待操作阶段。Web / CLI 同样在目标 profile 停止后安装，并在重新启动前完成登录。
 
 原生包管理器维护依赖和 bundle 列表。保留其他插件、模型、会话和用户 patch；禁止通过 `--from-default-profile`、删除 profile、手改全局 YAML 或禁用审批来完成安装。已安装同名包时先核对来源和本地修改；只处理确认属于上述官方仓库的安装。
 
@@ -54,11 +56,13 @@ node "${DSH_HOME:-$HOME/.dsh}/profiles/web/node_modules/dsh-openagent/login.mjs"
 
 OAuth 桥接器负责浏览器打开、回调、换码和刷新。不要打印认证文件、完整授权 URL 或原始日志，不另外打开授权 URL，不读取其他客户端 Token。登录的总等待有上限；取消、拒绝、失败、超时或结果未知时保留现场并停止，不自动重试。
 
-只有同一进程成功结束且输出 `OPENAGENT_LOGIN_CONNECTED`，才能说明“OpenAgent 登录连接已通过”；此时尚未完成账号或 Agent 业务验收。之后在插件页面启用 `dsh-openagent`，或重新启动对应 Web / CLI / Desktop。插件页面返回 `applied` 或显示实际已启用才表示加载成功；`restart-required` 只表示保存成功，仍需完成目标客户端重启。
+只有同一进程成功结束且输出 `OPENAGENT_LOGIN_CONNECTED`，才能说明“OpenAgent 登录连接已通过”；此时尚未完成账号或 Agent 业务验收。之后在插件页面启用 `dsh-openagent`，或正常启动已停止的目标客户端。插件页面返回 `applied` 或显示实际已启用只证明插件配置已应用，不能证明 MCP、Skills 或账号可用；`restart-required` 只表示保存成功，仍需由用户在无活动任务时正常退出并重新打开目标客户端。进程重新出现不能替代第 4 步验收。
 
 首次单独登录是为避开 Harness 约 60 秒的 MCP 初始化限制及 stdio 探测进程。正常运行由桥接器管理刷新；若凭据失效，桥接器仍可能发起浏览器续授权。此时等待已有尝试，不能同时再运行登录入口。插件关闭宿主自动重连；断线和未知结果不得自动重放业务调用。
 
 ## 4. 在目标客户端的新对话中验收
+
+安装 Agent 在当前目标客户端创建一次用户可见的新对话并发送“OpenAgent 已安装，打开新用户引导”；使用当前宿主实际提供的创建和发送能力，不猜测工具名称。若宿主没有该能力，只报告有证据的已完成阶段，并明确“新对话验收待完成”，由用户在目标客户端新建对话后发送这句话，不伪造自动跳转成功。
 
 确认新对话能发现以下五个 Skills，并能通过原生 `skill` 工具加载：
 
@@ -68,9 +72,11 @@ OAuth 桥接器负责浏览器打开、回调、换码和刷新。不要打印�
 - `openagent-run-agent`
 - `openagent-query-account`
 
-确认连接实际暴露 `mcp__openagent__` 前缀的 OpenAgent 工具。安装 Agent 在当前目标客户端创建一次用户可见的新对话并发送“OpenAgent 已安装，打开新用户引导”；使用当前宿主实际提供的创建和发送能力，不猜测工具名称。若宿主没有该能力，明确告知“文件及连接已配置，新对话验收待完成”，由用户在目标客户端新建对话后发送这句话，不伪造自动跳转成功。
+确认新对话的连接实际暴露 `mcp__openagent__` 前缀的 OpenAgent 工具，且能通过原生 `skill` 工具加载引导 Skill；不能用磁盘文件或旧对话的工具列表替代。
 
-验收须读取真实的引导及 `openagent_account_credits` 调用结果：一次账号查询返回严格的 `success=true`，且该轮正常结束，才报告“OpenAgent 安装及账号验证通过”。工具列表、OAuth 成功、配置文件存在或模型说“安装成功”都不能替代。CLI 子会话不能代替 Desktop / Web 可见新对话；失败或状态未知时不重发提示、不重复账号调用或 OAuth。
+验收须读取新对话内真实的引导及 `openagent_account_credits` 调用结果：引导调用正常完成并返回 `view=onboarding`、`status=ready`；随后一次账号查询正常完成且返回严格的 `success=true`，该轮也正常结束，才报告“OpenAgent 安装及账号验证通过”。工具列表、OAuth 成功、配置文件存在或模型说“安装成功”都不能替代。动画不可显示时不声称已播放；这与引导工具调用失败是不同结果。CLI 子会话不能代替 Desktop / Web 可见新对话。
+
+工具缺失、引导或账号调用失败、结果不完整或状态未知时，报告“OpenAgent 安装验收未完成”、失败阶段和可公开的错误信息，停止固定成功文案。不要重发提示、重复账号调用或 OAuth；工具缺失或网络错误本身不代表需要重新登录。禁止读取 Token、用 curl 或自制客户端直连 MCP、修改 profile 或自制重启来绕过验收。后续恢复须针对已确认的失败阶段，由用户重新授权。
 
 引导与账号查询不提交付费 Agent 任务，但使用模型会产生正常模型调用。搜索或选择 Agent 不等于授权执行；实际任务继续遵循已安装 Skills 的授权、上传、等待和结果验证规则。
 
@@ -81,7 +87,8 @@ OAuth 桥接器负责浏览器打开、回调、换码和刷新。不要打印�
 - 工具等待：1800 秒；未知终态不自动重跑。
 - Skills、结果交付 reference、登录说明和 COS 上传 SDK 随包安装，不复制到用户全局 Skill 目录。
 - 上传 SDK 压缩包及解压内容按随包锁定文件校验大小和 SHA-256；首次使用在执行 Skill 的 `scripts/.cos-sdk` 内生成缓存。该目录需当前用户可写；校验失败立即停止，不另装 SDK 或降级上传。
-- 不承诺 MCP Apps 卡片、嵌入网页或所有媒体原生渲染。仅使用宿主确认可见的页面能力；能力缺失时保留服务端返回的原始链接。
+- Desktop 的原生侧栏浏览器模块可用、当前会话有唯一可见客户端时，可通过随包 `openagent_browser_open` / `openagent_browser_status` / `openagent_browser_close` 打开、核对和关闭此次选择页面。成功回执只证明侧栏已提交页面，不证明网页内容已加载或用户已选择；超时或未确认时不再次打开。
+- Web 默认未启用侧栏浏览器模块，CLI 没有可见页面；页面能力缺失时保留服务端返回的原始链接，不声称已自动打开。不承诺 MCP Apps 卡片或所有媒体原生渲染；新用户引导动画不使用搜索选择页的浏览器流程。
 
 ## 更新与移除
 
