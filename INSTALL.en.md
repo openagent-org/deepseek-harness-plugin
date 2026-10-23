@@ -46,6 +46,8 @@ The native package manager maintains dependencies and the bundle list. Preserve 
 
 Harness's current built-in MCP client has no native OAuth configuration. This plugin connects to OpenAgent through the pinned version `mcp-remote@0.1.38` and stores its authentication state separately under the current `DSH_HOME/openagent-auth`. It does not reuse sign-in from Hermes, Codex, or any other client.
 
+When upgrading from the former website domain, first verify that the installed `login.mjs` uses `https://openagent.org/mcp/v1/open-agent`, then obtain the user's explicit authorization and run the normal sign-in flow in this section once. The new domain uses a new OAuth issuer/resource; a successful old-domain login does not authorize the new domain. Preserve the existing authentication files. Do not copy old tokens, rewrite their resource, or rename old authentication files into new-domain records. The bridge stores authentication separately for each full endpoint.
+
 Run the sign-in entry point once from the installed package directory. The following example uses the Web profile under the default home directory. For Desktop, replace `web` with `desktop`; for another profile, use its actual name. A custom `DSH_HOME` must exactly match the target Harness. On Windows, use the corresponding user home directory and path syntax.
 
 ```bash
@@ -110,7 +112,7 @@ Guidance and the account query do not submit a paid Agent task, but using the mo
 
 ## Configuration and capability scope
 
-- MCP: `https://oasn-ow.haimawan.com/mcp/v1/open-agent`, using Streamable HTTP through a stdio OAuth bridge.
+- MCP: `https://openagent.org/mcp/v1/open-agent`, using Streamable HTTP through a stdio OAuth bridge.
 - Request headers: `X-OASN-MCP-OAuth: required` and `X-OASN-MCP-Content-Mode: text-compatible`. Do not write a Bearer token into the profile.
 - Tool wait: 1800 seconds. Do not automatically rerun a call whose terminal state is unknown.
 - Skills, the result delivery reference, sign-in instructions, and the COS upload SDK are installed with the package. Do not copy them to the user's global Skill directory.
@@ -134,7 +136,7 @@ Only after removal succeeds, reinstall under the same home directory and the sam
 dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'
 ```
 
-Keep `DSH_HOME/openagent-auth`; do not clear authentication or sign in again when the connection has already succeeded. If removal or reinstallation fails, is cancelled, or has an unknown result, stop without automatically replaying the entire update process. Switching sources remains limited to the failed download stages allowed in step 2. After installation succeeds, check the actual installed source and version, then enable the plugin or normally start the stopped target client. If it is already available, do not restart it again; verify in a new conversation as described in step 4. Package installation success alone does not establish that update verification passed.
+Keep `DSH_HOME/openagent-auth`; do not clear authentication or sign in again when the same new endpoint is already connected. A migration from the old domain still requires explicit authorization and one new-domain sign-in under step 3. If removal or reinstallation fails, is cancelled, or has an unknown result, stop without automatically replaying the entire update process. Switching sources remains limited to the failed download stages allowed in step 2. After installation succeeds, check the actual installed source and version, then enable the plugin or normally start the stopped target client. If it is already available, do not restart it again; verify in a new conversation as described in step 4. Package installation success alone does not establish that update verification passed.
 
 ### Uninstall
 

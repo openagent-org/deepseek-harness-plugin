@@ -46,6 +46,8 @@ dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepsee
 
 Harness 当前内置 MCP 客户端没有原生 OAuth 配置。本插件使用固定版本 `mcp-remote@0.1.38` 连接 OpenAgent，并把认证状态独立保存在当前 `DSH_HOME/openagent-auth`。它不复用 Hermes、Codex 或其他客户端的登录。
 
+从旧官网域名升级到本版本时，先核对实际安装包的 `login.mjs` 端点为 `https://openagent.org/mcp/v1/open-agent`，再由用户明确授权，按本节正常执行一次登录。新域使用新的 OAuth issuer/resource，旧域登录成功不能代替新域授权。保留原认证文件；不复制旧 Token、不改写其 resource，也不把旧认证文件改名成新域的记录。桥接器按完整端点分别保存认证。
+
 在安装后的包目录运行一次登录入口。下面以默认主目录的 Web profile 为例；Desktop 改为 `desktop`，其他 profile 使用实际名称。自定义 `DSH_HOME` 必须与目标 Harness 完全相同。Windows 使用相应的用户主目录与路径写法。
 
 ```bash
@@ -110,7 +112,7 @@ node (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/post-install.mj
 
 ## 配置与能力范围
 
-- MCP：`https://oasn-ow.haimawan.com/mcp/v1/open-agent`，Streamable HTTP，由 stdio OAuth 桥接器接入。
+- MCP：`https://openagent.org/mcp/v1/open-agent`，Streamable HTTP，由 stdio OAuth 桥接器接入。
 - 请求头：`X-OASN-MCP-OAuth: required`、`X-OASN-MCP-Content-Mode: text-compatible`；不把 Bearer 写进 profile。
 - 工具等待：1800 秒；未知终态不自动重跑。
 - Skills、结果交付 reference、登录说明和 COS 上传 SDK 随包安装，不复制到用户全局 Skill 目录。
@@ -134,7 +136,7 @@ dsh plugin --profile <profile> remove dsh-openagent
 dsh plugin --profile <profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'
 ```
 
-保留 `DSH_HOME/openagent-auth`，不要清空认证或重复登录已成功的连接。移除或重新安装失败、取消或结果未知时停止，不自动重放整个更新流程；网络换源仍只限第 2 步允许的失败下载阶段。安装成功后核对实际安装的来源和版本，启用插件或正常启动已停止的目标客户端；已可用时无需额外重启，按第 4 步在新对话验收；不能只凭包安装成功报告更新验收通过。
+保留 `DSH_HOME/openagent-auth`，不要清空认证或重复登录同一新端点已成功的连接；旧域迁移仍须先按第 3 步明确授权并完成一次新域登录。移除或重新安装失败、取消或结果未知时停止，不自动重放整个更新流程；网络换源仍只限第 2 步允许的失败下载阶段。安装成功后核对实际安装的来源和版本，启用插件或正常启动已停止的目标客户端；已可用时无需额外重启，按第 4 步在新对话验收；不能只凭包安装成功报告更新验收通过。
 
 ### 卸载
 

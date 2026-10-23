@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { authRuntimeVersion, loadBridgeRuntime, runProxy } from './bridge.mjs'
 
-export const endpoint = 'https://oasn-ow.haimawan.com/mcp/v1/open-agent'
+export const endpoint = 'https://openagent.org/mcp/v1/open-agent'
 export const headers = {
   'X-OASN-MCP-OAuth': 'required',
   'X-OASN-MCP-Content-Mode': 'text-compatible',
