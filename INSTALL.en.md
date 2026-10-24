@@ -4,6 +4,16 @@ The installation Agent must execute these steps in the current ordinary conversa
 
 This guide was checked against Harness `0.2.1-rc.2` and supports local Desktop, Web, and CLI on `>=0.2.1-rc.2 <0.3.0`. The displayed plugin name is **OpenAgent**; its internal package name is `dsh-openagent`. Online installation relies on the host's profile hot loading. A successful installation command does not prove OAuth, tool availability, or new-conversation verification.
 
+Use these fixed user-visible progress messages. The host displays command details; do not append internal state or raw logs:
+
+- When starting installation: “Installing OpenAgent…”
+- Only when the same connection attempt confirms that the authorization page opened automatically and is waiting for the user: “Please sign in to OpenAgent on the page that opened…”
+- Only after the same sign-in process emits its success marker and exits with code 0: “Signed in to OpenAgent”
+- When installation or connection fails: “Installation failed: {reason}. {solution}”. Replace the placeholders with the confirmed short reason and a currently actionable next step; do not guess the failed stage.
+- On a confirmed authorization timeout: “Sign-in timed out. OpenAgent installation is incomplete. Check the failure card for the stage and reason.”
+
+Use the final reply in step 3 after preparation and the final reply in step 4 after verified completion. Opening the authorization page, successful sign-in, and a ready connection do not authorize installation-verification success wording.
+
 ## 1. Check the current host and execution tools
 
 Use the ordinary conversation's actual `bash` or `pwsh` and `job_output` tools. Check that the shell schema supports `description`, `command`, `run_in_background: true`, `sandbox_permissions: "danger-full-access"`, and `justification`. Installation and preparation write to the current Harness profile: request the required access on the first call for each operation without changing global permissions. Stop if tools or arguments are unavailable or approval is denied or cancelled; do not retry through another entry point.
@@ -16,7 +26,7 @@ Read only the relevant dependency source, `dsh.profile.bundles`, disablement rec
 
 ## 2. Install once with the current host's CLI
 
-Prefer Gitee for the initial download; use GitHub once as a fallback only for the network download failures defined below. Run this only when the plugin is not installed. First tell the user: “Installing and connecting OpenAgent. If an authorization page opens, please complete authorization there.”
+Prefer Gitee for the initial download; use GitHub once as a fallback only for the network download failures defined below. Run this only when the plugin is not installed, using the fixed starting message above.
 
 For macOS / Linux, call `bash`:
 
@@ -52,7 +62,7 @@ Keep waiting on that task while it is running; do not reinstall. Only a confirme
 
 The CLI adds the new bundle to the enabled list, and the host first attempts online loading. Whenever the bundle loads, the plugin runs its bundled sign-in connection check once without automatic retries. Existing valid authorization is reused without reopening the authorization page. MCP mounts only after that same process outputs `OPENAGENT_LOGIN_CONNECTED` and exits with code 0. First authorization has a 330-second total limit, including 300 seconds for browser authorization, preventing native MCP initialization and probing from cutting authorization short. **Do not run `runtime/login.mjs` separately in the shell, reopen the authorization URL, or start a concurrent sign-in.** That entry reuses valid sign-in for the same endpoint. Authorize only `https://openagent.org/mcp/v1/open-agent`; do not copy, rewrite, or reuse authentication records from a different endpoint.
 
-After the installation process exits with code 0, reread the installed package name, version, official source, and enabled list, and confirm that no disablement record applies. Then continue to step 3. Report only that installation files are ready; do not infer a working connection from the exit code. Preserve other plugins, models, conversations, and configuration. Do not delete the profile or use `--from-default-profile`.
+After the installation process exits with code 0, reread the installed package name, version, official source, and enabled list, and confirm that no disablement record applies. Then continue to step 3. That result proves only that installation files are ready. Do not add a completion message or infer a working connection from the exit code. Preserve other plugins, models, conversations, and configuration. Do not delete the profile or use `--from-default-profile`.
 
 ## 3. Prepare once and end the current turn
 
@@ -72,9 +82,17 @@ if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -
 & '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale en
 ```
 
-If the command succeeds and returns `OPENAGENT_ONBOARDING_PREPARED` with `status="pending"`, report only: “Installation files are ready and automatic verification is prepared. Complete the authorization page if one opened, and keep this installation conversation in the only visible window. The plugin will open a new conversation when ready.” **Immediately end the current turn. Do not wait for completed in this turn or call `openagent_install_verify`.** The original conversation must become idle before the plugin can claim the preparation.
+If the command succeeds and returns `OPENAGENT_ONBOARDING_PREPARED` with `status="pending"`, replace the version placeholder with the actual reread version. The final natural-language reply must contain exactly these two paragraphs, without links, logs, IDs, or installation-success wording:
 
-The preparation expires after 30 minutes. The verification service registers before waiting for sign-in; it keeps the preparation pending and unclaimed while sign-in or MCP is not ready. Once MCP and the five business Skills are available and the original conversation is idle and uniquely visible, the plugin creates and displays a new conversation and sends “OpenAgent installed. Open the new user guide.” once, preserving the original draft. The guide task inherits the original installation task's workspace; only an originally ungrouped task falls back to its working directory. Do not create another conversation, manually resend the fixed prompt, or ask the user to send it again. Preserve any returned existing state or failure; successful preparation is not successful verification.
+```text
+OpenAgent {version} installation files are ready, and automatic verification is prepared.
+
+Keep this installation conversation in the only visible window. If an authorization page opened, complete authorization there. The new user guide will open automatically when the connection is ready.
+```
+
+**Immediately end the current turn. Do not wait for completed in this turn or call `openagent_install_verify`.** The original conversation must become idle before the plugin can claim the preparation.
+
+The preparation expires after 30 minutes. The verification service registers before waiting for sign-in; it keeps verification pending and unclaimed while sign-in or MCP initialization is still running. If the connection fails or becomes unconfirmed, stop and show diagnostics as described in step 4. Once the connection status is `ready`, MCP and the five business Skills are actually available, and the original conversation is idle and uniquely visible, the plugin creates and displays a new conversation and sends “OpenAgent installed. Open the new user guide.” once, preserving the original draft. The guide task inherits the original installation task's workspace; only an originally ungrouped task falls back to its working directory. Do not create another conversation, manually resend the fixed prompt, or ask the user to send it again. Preserve any returned existing state or failure; successful preparation is not successful verification.
 
 ## 4. Read the result; reopen normally with the same preparation if needed
 
@@ -92,7 +110,18 @@ PowerShell:
 & '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --status --profile $env:DSH_PROFILE
 ```
 
-Status queries returning `pending` or `NO_ATTEMPT` also include `connection_status`: `not_started` means this version has no Host connection attempt; `connecting` means the same sign-in or MCP initialization is still in progress; `ready` means that same sign-in process succeeded and MCP initialization succeeded, not that business verification passed. Stop for `failed` or `unconfirmed` without reopening to retry OAuth. Treat a missing or invalid field as unknown. A cold start may require completing browser authorization before the host becomes ready.
+Status queries retain `connection_status` and return safe diagnostics in `connection`: required `status`, with optional `stage/code/http_status/started_at/updated_at` when supported by a trusted record. The timestamps are Unix milliseconds for the connection start and latest update. Before any attempt, the object is only `{status:"not_started"}`; do not invent a stage or time. `not_started` means this version has no Host connection attempt; `connecting` means the same attempt is still running; `ready` means the same sign-in process and MCP initialization succeeded, not that business verification passed. Stop for `failed` or `unconfirmed` without reopening to retry OAuth. Treat invalid fields or an unconfirmed state as unknown. A cold start may require completing browser authorization before the host becomes ready.
+
+| `connection.stage` | Actual stage |
+| --- | --- |
+| `preparing` | Preparing the connection and checking runtime dependencies and the dedicated authentication directory. |
+| `login` | Running the same sign-in connection check, entering authorization if necessary. |
+| `waiting_authorization` | Confirmed that the authorization page opened automatically; waiting for this browser authorization. |
+| `mcp` | The sign-in process succeeded and MCP is loading; use `connection.status` to determine readiness. |
+
+Only allowlisted public reasons are used: `AUTH_TIMEOUT` / `AUTH_REJECTED` for authorization timeout or rejection, `NETWORK_TIMEOUT` / `NETWORK_ERROR` for network timeout or error, `HTTP_ERROR` with the actual HTTP status when available, `PROTOCOL_ERROR` for protocol errors, `DEPENDENCY_ERROR` for runtime dependency problems, `LOGIN_FAILED` for an otherwise unclassified sign-in failure, `MCP_STARTUP_FAILED` for MCP initialization failure, `STATE_UNAVAILABLE` for unavailable state, and `CONNECTION_STOPPED` for an interrupted attempt. Do not infer a particular network, authorization, or MCP cause from a generic failure. Never print Tokens, authorization URLs, callback parameters, raw stderr, or business content.
+
+Before a preparation is claimed, a failed connection returns `status=failed/code=CONNECTION_FAILED`; an unconfirmed connection returns `status=unconfirmed/code=CONNECTION_UNCONFIRMED`, with the diagnostics above. The Host claims the original preparation and persists the failure once; later connection recovery or Host reload does not replay that preparation. It shows a card below the trusted source installation turn with the fixed stage, public reason, and applicable HTTP status. It states that verification stopped without automatic retries. The card has no retry button and does not invoke OAuth or the model; do not ask the user to keep querying. If the trusted installation turn cannot be established, do not promise a card; use the read-only query.
 
 Handle the receipt following `OPENAGENT_ONBOARDING_STATE`, or the tool's returned state, as follows:
 
@@ -100,11 +129,21 @@ Handle the receipt following `OPENAGENT_ONBOARDING_STATE`, or the tool's returne
 | --- | --- |
 | `pending`, unclaimed and unexpired, with `connection_status=not_started` or `ready` | Preserve the same preparation and end the query turn. Prefer online loading. If the conversation still does not appear and reopening is necessary, finish other tasks, quit and reopen Harness normally, and return to the same installation conversation within the original 30-minute expiry. Keep it uniquely visible and idle for automatic continuation. No reinstall, new preparation, or prompt is needed. |
 | `pending` with `connection_status=connecting` | End the query turn and wait for the same connection attempt. Do not reopen, sign in separately, or resend the prompt. |
-| `completed` with all four evidence fields strictly `true` | Report “OpenAgent installation and account verification passed. Continue in the new conversation.” |
+| `completed` with all four evidence fields strictly `true` | Reread the actual installed version and follow the completion rules below. Model prose or a card's appearance alone does not prove verification. |
 | `NO_ATTEMPT` during the first precheck | Create the first preparation only when every condition in step 3 holds. Stop if there was a previous attempt. |
-| Claimed, `unconfirmed`, `failed`, expired, or a `failed` / `unconfirmed`, missing, or invalid connection state | Report “OpenAgent installation verification is incomplete,” the actual stage, and public error. Preserve state without reopening to retry, resending, extending expiry, or changing conversations to bypass the record. |
+| Claimed, `unconfirmed`, `failed`, expired, or a `failed` / `unconfirmed`, missing, or invalid connection state | Use the fixed failure message with the actual stage, public reason, and actionable next step. Preserve state without reopening to retry, resending, extending expiry, or changing conversations to bypass the record. |
 
 The four evidence fields are `guide_loaded`, `guide_success`, `account_success`, and `turn_completed`, all strictly `true`: the new conversation loads the guide Skill, the guide returns `view=onboarding/status=ready`, one account call returns strict `success=true`, and that turn completes normally. Verification lasts at most 600 seconds and never beyond the preparation's remaining lifetime. A tool catalog, successful OAuth, a reopened process, or model prose cannot replace that evidence.
+
+When reporting completion, first obtain the completed receipt above, reread the actual installed package version without modifying it, and confirm it matches the installation version. If the real completion card is visible on the original installation turn, the final natural-language reply must contain exactly these two paragraphs with the actual version substituted. Do not append links, technical details, tool-loading reasons, task IDs, other prose, or the Codex `::created-thread` directive:
+
+```text
+OpenAgent {version} has been installed. The new user guide and account verification passed.
+
+Select “Open new user guide” below to continue.
+```
+
+If the card is not visible or no trusted installation turn exists, replace the second paragraph with “Continue in the new user guide conversation that is already open.” Do not invent a button. Without every verification result, or if versions differ, do not use completion wording; report the actual stage and public reason for incompletion. The original pending reply is not rewritten as a success reply.
 
 After the successful result is saved, the plugin shows a separate completion card below the final reply of the original installation turn: “OpenAgent installation and account verification passed”, with an “Open new user guide” button. It does not navigate back automatically. Returning to the original task, including after a normal reopen, shows the saved card. The button only opens the existing guide task; it does not create a task, resend the prompt, or call the model. If the installation turn cannot be established from trusted events, no card is shown; the read-only query above remains authoritative for verification. Version 0.1.11 does not migrate existing 0.1.10 guide tasks or state across versions.
 

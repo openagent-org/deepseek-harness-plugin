@@ -4,6 +4,16 @@
 
 本指南核对 Harness `0.2.1-rc.2`，支持 `>=0.2.1-rc.2 <0.3.0` 的本地 Desktop、Web 和 CLI。插件显示名称为 **OpenAgent**，内部包名为 `dsh-openagent`。在线安装依赖宿主的 profile 热加载；安装命令成功不证明 OAuth、工具加载或新对话验收已通过。
 
+用户可见的阶段提示使用以下固定文案；命令细节由宿主展示，不把内部状态或原始日志拼入提示：
+
+- 开始执行安装：“正在安装 OpenAgent…”
+- 同一连接尝试确认授权页已自动打开并等待用户时：“请在打开的页面中登录 OpenAgent…”
+- 同一登录进程输出成功标记且退出码为 0 时：“已登录 OpenAgent”
+- 安装或连接失败：“安装失败：{原因}。{解决方案}”。填入已确认的简短原因和当前可执行的处理，不输出占位符，不猜测失败阶段。
+- 明确的授权超时：“登录超时，OpenAgent 安装尚未完成。请查看安装失败卡片中的阶段和原因。”
+
+预约后的最终回复按第 3 步，真正完成后的最终回复按第 4 步。授权页打开、登录成功和连接就绪均不能使用安装验收完成文案。
+
 ## 1. 核对当前宿主和执行工具
 
 使用普通对话实际提供的 `bash` 或 `pwsh`、`job_output`。核对 shell schema 支持 `description`、`command`、`run_in_background: true`、`sandbox_permissions: "danger-full-access"` 和 `justification`。安装和保存预约会写入当前 Harness profile，首次调用就请求当次所需权限；不改全局权限。工具或参数缺失、审批拒绝或取消时停止，不换入口重试。
@@ -16,7 +26,7 @@
 
 ## 2. 用当前宿主 CLI 安装一次
 
-首次下载优先 Gitee，仅符合下述网络下载失败条件时使用 GitHub 备用源一次。仅尚未安装时执行。先告知用户：“正在安装并连接 OpenAgent；如出现授权页，请在网页完成授权。”
+首次下载优先 Gitee，仅符合下述网络下载失败条件时使用 GitHub 备用源一次。仅尚未安装时执行；开始时使用上方固定提示。
 
 macOS / Linux 的 `bash` 调用：
 
@@ -52,7 +62,7 @@ Windows 的 `pwsh` 调用：
 
 CLI 会将新 bundle 加入启用列表，宿主优先在线加载。每次加载 bundle 时，插件自动运行一次包内登录连接检查，不自动重试；已有有效授权时复用且不再打开授权页。只有同一进程输出 `OPENAGENT_LOGIN_CONNECTED` 且退出码为 0 后才挂载 MCP。首次授权的总时限为 330 秒，网页等待 300 秒，避免原生 MCP 初始化和探测阶段截断授权。**不要在 shell 另跑 `runtime/login.mjs`、补开授权 URL 或并行启动第二次登录**。已有同端点有效登录由该入口复用。仅为 `https://openagent.org/mcp/v1/open-agent` 完成授权；不同端点的认证记录不得复制、改写或复用。
 
-安装进程退出码为 0 后，回读实际包的名称、版本、官方来源和启用列表，确认无禁用记录，再进入第 3 步。只报告安装文件已就绪，不从退出码推断连接成功。保留其他插件、模型、会话及配置，不删除 profile，不使用 `--from-default-profile`。
+安装进程退出码为 0 后，回读实际包的名称、版本、官方来源和启用列表，确认无禁用记录，再进入第 3 步。该结果仅证明安装文件已就绪，不另行输出完成提示，不从退出码推断连接成功。保留其他插件、模型、会话及配置，不删除 profile，不使用 `--from-default-profile`。
 
 ## 3. 保存一次预约，结束当前轮
 
@@ -72,9 +82,17 @@ if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -
 & '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
 ```
 
-命令成功且输出 `OPENAGENT_ONBOARDING_PREPARED`、`status="pending"` 时，只报告：“安装文件已就绪，自动验收已预约。请完成已打开的授权页，并保持本安装会话在唯一可见窗口；插件就绪后会自动打开新对话。”**随即结束当前轮，不在本轮等待 completed，也不调用 `openagent_install_verify`。** 原会话必须先空闲，插件才能领取预约。
+命令成功且输出 `OPENAGENT_ONBOARDING_PREPARED`、`status="pending"` 时，用已回读的实际版本替换占位符，最终自然语言回复严格为以下两段，不追加链接、日志、ID 或安装成功文案：
 
-预约有效期 30 分钟。验收服务在等待登录前注册；登录或 MCP 未就绪时保留 pending，不提前领取。MCP 与五项业务 Skills 可用、原会话空闲且唯一可见时，插件自动创建并显示新对话，发送一次“OpenAgent 已安装，打开新用户引导”，保留原会话草稿。新引导任务继承原安装任务所属工作区；原任务未归入任何工作区时才沿用原工作目录。不要另外建对话、手动补发固定提示或要求用户再发一遍。输出已有状态或发生失败时保留该状态，不能把预约成功当作验收成功。
+```text
+OpenAgent {版本号} 安装文件已就绪，自动验收已预约。
+
+请保持本安装会话在唯一可见窗口；如已打开授权页，请在网页完成授权。连接就绪后会自动打开新用户引导。
+```
+
+**随即结束当前轮，不在本轮等待 completed，也不调用 `openagent_install_verify`。** 原会话必须先空闲，插件才能领取预约。
+
+预约有效期 30 分钟。验收服务在等待登录前注册；登录或 MCP 仍在进行时保留 pending，不提前领取验收；连接失败或未知按第 4 步停止并显示诊断。连接状态为 `ready`、MCP 与五项业务 Skills 实际可用、原会话空闲且唯一可见时，插件自动创建并显示新对话，发送一次“OpenAgent 已安装，打开新用户引导”，保留原会话草稿。新引导任务继承原安装任务所属工作区；原任务未归入任何工作区时才沿用原工作目录。不要另外建对话、手动补发固定提示或要求用户再发一遍。输出已有状态或发生失败时保留该状态，不能把预约成功当作验收成功。
 
 ## 4. 读取结果；必要时沿用预约正常重开
 
@@ -92,7 +110,18 @@ PowerShell：
 & '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --status --profile $env:DSH_PROFILE
 ```
 
-状态查询对 `pending` 或 `NO_ATTEMPT` 同时返回 `connection_status`：`not_started` 表示该版本尚无 Host 连接尝试；`connecting` 表示仍在等待同一登录或 MCP 初始化；`ready` 表示同一登录子进程成功且 MCP 初始化成功，仍不代表业务验收。`failed` 或 `unconfirmed` 必须停止，不能借重开重试 OAuth；缺少该字段或值非法按未知处理。冷启动可能需要完成网页授权后宿主才就绪。
+状态查询保留 `connection_status`，并通过 `connection` 返回当前连接的安全诊断：必填 `status`，以及有可信记录时的可选 `stage/code/http_status/started_at/updated_at`。两个时间为连接开始和最近更新的 Unix 毫秒；尚无尝试时仅有 `{status:"not_started"}`，不虚构阶段或时间。`not_started` 表示该版本尚无 Host 连接尝试；`connecting` 表示同一尝试仍在进行；`ready` 表示同一登录子进程成功且 MCP 初始化成功，仍不代表业务验收。`failed` 或 `unconfirmed` 必须停止，不能借重开重试 OAuth；字段非法或状态无法确认按未知处理。冷启动可能需要完成网页授权后宿主才就绪。
+
+| `connection.stage` | 实际阶段 |
+| --- | --- |
+| `preparing` | 准备连接，检查运行依赖和专用认证目录。 |
+| `login` | 执行同一次登录连接检查，必要时进入授权。 |
+| `waiting_authorization` | 已确认授权页自动打开，等待本次网页授权。 |
+| `mcp` | 登录进程已成功，正在加载 MCP；是否就绪以 `connection.status` 为准。 |
+
+公开原因仅使用白名单：`AUTH_TIMEOUT` / `AUTH_REJECTED` 表示授权超时或拒绝，`NETWORK_TIMEOUT` / `NETWORK_ERROR` 表示网络超时或错误，`HTTP_ERROR` 可附带实际 HTTP 状态，`PROTOCOL_ERROR` 表示协议错误，`DEPENDENCY_ERROR` 表示运行依赖异常，`LOGIN_FAILED` 表示未能进一步归类的登录失败，`MCP_STARTUP_FAILED` 表示 MCP 初始化失败，`STATE_UNAVAILABLE` 表示状态不可用，`CONNECTION_STOPPED` 表示连接尝试中断。不要根据笼统失败推断某个网络、授权或 MCP 原因，不输出 Token、授权 URL、回调参数、原始 stderr 或业务正文。
+
+预约仍未领取时，连接失败会直接返回 `status=failed/code=CONNECTION_FAILED`，无法确认则返回 `status=unconfirmed/code=CONNECTION_UNCONFIRMED`，并附上述连接诊断。Host 领取原预约后持久保存一次失败，之后连接恢复或 Host 重载也不重放该预约；并在可信源安装轮下显示“OpenAgent 连接失败”或“OpenAgent 连接结果未确认”卡片，列出固定阶段、公开原因及适用的 HTTP 状态，说明本次验收已停止且未自动重试。卡片无重试按钮，不触发 OAuth 或模型调用；无需让用户持续查询。无法确定可信安装轮次时不承诺卡片出现，使用只读入口核对。
 
 `OPENAGENT_ONBOARDING_STATE` 后的回执或工具返回状态按下表处理：
 
@@ -100,11 +129,21 @@ PowerShell：
 | --- | --- |
 | `pending`，未领取、未过期，且 `connection_status=not_started` 或 `ready` | 保留同一预约并结束查询轮。在线加载优先；仍未自动打开且确需重开时，待其他任务结束后正常退出并重开 Harness，在预约的原有 30 分钟期限内回到同一安装会话，保持唯一可见和空闲，插件自动继续。无需重装、重新预约或发送提示。 |
 | `pending` 且 `connection_status=connecting` | 结束查询轮，等待同一连接尝试；不重开、不另行登录、不补发提示。 |
-| `completed` 且四项证据均为 `true` | 报告“OpenAgent 安装及账号验证通过，可以在新对话继续使用”。 |
+| `completed` 且四项证据均为 `true` | 再次回读实际安装版本，按下方完成规则报告；不能只凭模型正文或卡片外观认定通过。 |
 | 首次预检返回 `NO_ATTEMPT` | 仅满足第 3 步全部条件时创建首次预约；有过尝试后返回此值必须停止。 |
-| 已领取、`unconfirmed`、`failed`、过期，或连接状态为 `failed` / `unconfirmed`、缺失、非法 | 报告“OpenAgent 安装验收未完成”、实际阶段和公开错误；保留状态，不重开重试、不补发、不续期、不换会话绕过记录。 |
+| 已领取、`unconfirmed`、`failed`、过期，或连接状态为 `failed` / `unconfirmed`、缺失、非法 | 使用固定失败文案，填入实际阶段、公开原因和可执行处理；保留状态，不重开重试、不补发、不续期、不换会话绕过记录。 |
 
 四项证据为 `guide_loaded`、`guide_success`、`account_success`、`turn_completed`，必须严格为 `true`：新对话实际加载引导 Skill，引导返回 `view=onboarding/status=ready`，一次账号调用返回严格的 `success=true`，并正常结束该轮。验收最多使用 600 秒且不超过预约剩余期限。工具目录、OAuth 成功、进程重开或模型正文都不能替代该结果。
+
+需要报告完成结果时，先取得上述 completed 回执，再次只读回读实际安装包版本并确认与安装时一致。若原安装轮的真实完成卡片可见，最终自然语言回复必须严格为以下两段，用实际版本替换占位符，不追加链接、技术说明、工具加载原因、任务 ID 或其他文字，也不输出 Codex 的 `::created-thread` 指令：
+
+```text
+OpenAgent {版本号} 已安装完成，新用户引导和账号验证已通过。
+
+点击下方「打开新用户引导」继续。
+```
+
+若卡片不可见或没有可信安装轮次，第二段改为“请在已打开的新用户引导对话中继续。”，不得虚构按钮。未取得完整验收证据或版本不一致时，不使用完成文案，按实际阶段和公开原因报告未完成。原安装轮的 pending 回复不会被改写为成功回复。
 
 成功结果保存后，插件在原安装任务对应安装轮的最终回复下方显示独立完成卡片“OpenAgent 安装及账号验证通过”，按钮为“打开新用户引导”。页面不会自动切回原任务；用户返回原任务（包括正常重开后返回）即可查看已保存的卡片。点击按钮只打开已存在的引导任务，不创建任务、不重发提示、不调用模型。无法确定可信安装轮次时不显示卡片，实际验收结果仍以上述只读查询为准。0.1.11 不迁移既有 0.1.10 引导任务或跨版本状态。
 

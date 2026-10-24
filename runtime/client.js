@@ -236,6 +236,7 @@ const onboardingFailureCodes = [
   'SEND_REJECTED', 'SEND_UNCONFIRMED', 'CLIENT_DISCONNECTED', 'BRIDGE_DISPOSED', 'CALL_CANCELLED',
   'VERIFICATION_TIMEOUT', 'GUIDE_SKILL_FAILED', 'GUIDE_FAILED', 'ACCOUNT_FAILED',
   'UNEXPECTED_TOOL', 'DUPLICATE_TOOL', 'PROMPT_MISMATCH', 'TURN_FAILED', 'EVIDENCE_MISSING',
+  'CONNECTION_FAILED', 'CONNECTION_UNCONFIRMED',
 ]
 function onboardingPrompt(locale) {
   if (locale === 'zh-CN') return 'OpenAgent 已安装，打开新用户引导'
@@ -249,6 +250,42 @@ const id = value => {
 const exact = (value, keys) => {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) {
     throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+  }
+  return value
+}
+const onboardingConnectionCodes = [
+  'AUTH_TIMEOUT', 'AUTH_REJECTED', 'NETWORK_TIMEOUT', 'NETWORK_ERROR', 'HTTP_ERROR',
+  'PROTOCOL_ERROR', 'DEPENDENCY_ERROR', 'LOGIN_FAILED', 'MCP_STARTUP_FAILED',
+  'STATE_UNAVAILABLE', 'CONNECTION_STOPPED',
+]
+// 只提取已知错误类型与数字状态；不保留 message、stack、URL 或服务端正文。
+function connectionFailure(error, stage, fallback = stage === 'mcp' ? 'MCP_STARTUP_FAILED' : 'LOGIN_FAILED') {
+  let code = fallback
+  let http_status
+  for (let current = error, depth = 0; current && depth < 5; current = current.cause, depth++) {
+    if (onboardingConnectionCodes.includes(current.data?.connection_code)) code = current.data.connection_code
+    else if (onboardingConnectionCodes.includes(current.code)) code = current.code
+    else if (['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', -32001].includes(current.code)
+      || current.name === 'TimeoutError') code = 'NETWORK_TIMEOUT'
+    else if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'].includes(current.code)) code = 'NETWORK_ERROR'
+    else if (['access_denied', 'invalid_grant', 'unauthorized_client', 'invalid_client', 'invalid_scope'].includes(current.errorCode)) code = 'AUTH_REJECTED'
+    else if (current.code === -32700 || current.code === -32600 || current.code === -32602 || current.name === 'ZodError') code = 'PROTOCOL_ERROR'
+    const http = current.data?.http_status ?? current.code
+    if (Number.isInteger(http) && http >= 100 && http <= 599) {
+      http_status = http
+      code = [401, 403].includes(http_status) ? 'AUTH_REJECTED' : 'HTTP_ERROR'
+    }
+  }
+  return { stage, code, ...(http_status ? { http_status } : {}) }
+}
+function checkedConnection(value) {
+  exact(value, ['status', 'stage', 'code', 'http_status', 'started_at', 'updated_at'])
+  if (!['not_started', 'connecting', 'ready', 'failed', 'unconfirmed'].includes(value.status)
+    || ('stage' in value && !['preparing', 'login', 'waiting_authorization', 'mcp'].includes(value.stage))
+    || ('code' in value && !onboardingConnectionCodes.includes(value.code))
+    || ('http_status' in value && (!Number.isInteger(value.http_status) || value.http_status < 100 || value.http_status > 599))
+    || ['started_at', 'updated_at'].some(key => key in value && (!Number.isSafeInteger(value[key]) || value[key] <= 0))) {
+    throw new Error('OPENAGENT_ONBOARDING_INVALID_CONNECTION')
   }
   return value
 }
@@ -276,11 +313,14 @@ const message = codec('Message', value => {
     const completion = exact(value.completion, ['sourceTurn', 'locale', 'result'])
     if (!Number.isSafeInteger(completion.sourceTurn) || completion.sourceTurn <= 0) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
     onboardingPrompt(completion.locale)
-    const result = exact(completion.result, ['status', 'request_id', 'session_id', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed'])
+    const result = exact(completion.result, ['status', 'request_id', 'session_id', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed', 'code', 'connection'])
     id(result.request_id); id(result.session_id)
-    if (result.status !== 'completed' || ['guide_loaded', 'guide_success', 'account_success', 'turn_completed'].some(key => result[key] !== true)) {
-      throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
-    }
+    const evidence = ['guide_loaded', 'guide_success', 'account_success', 'turn_completed']
+    if (result.status === 'completed') {
+      if ('code' in result || 'connection' in result || evidence.some(key => result[key] !== true)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    } else if (!['failed', 'unconfirmed'].includes(result.status) || !onboardingFailureCodes.includes(result.code)
+      || evidence.some(key => key in result)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    if ('connection' in result) checkedConnection(result.connection)
   } else {
     exact(value, ['type', 'sessionId', 'requestId', 'targetSessionId', 'promptId', 'locale', 'cwd', 'workspaceId', 'expiresAt'])
     id(value.requestId); id(value.targetSessionId); id(value.promptId)
@@ -397,8 +437,60 @@ function createOnboardingResultCard(createElement) {
     const completion = useCompletion(value => value)
     if (!completion || completion.sourceTurn !== turn.turn) return null
     const { result } = completion
-    if (result.status !== 'completed') return null
+    if (!['completed', 'failed', 'unconfirmed'].includes(result.status)) return null
     const english = completion.locale === 'en'
+    if (result.status !== 'completed') {
+      const connection = result.connection
+      const connectionResult = ['CONNECTION_FAILED', 'CONNECTION_UNCONFIRMED'].includes(result.code)
+      const title = connectionResult
+        ? result.status === 'failed' ? (english ? 'OpenAgent connection failed' : 'OpenAgent 连接失败')
+          : (english ? 'OpenAgent connection result unconfirmed' : 'OpenAgent 连接结果未确认')
+        : result.status === 'failed' ? (english ? 'OpenAgent installation verification failed' : 'OpenAgent 安装验收未通过')
+          : (english ? 'OpenAgent installation verification unconfirmed' : 'OpenAgent 安装验收结果未确认')
+      const stages = english
+        ? { preparing: 'Preparing connection', login: 'Signing in', waiting_authorization: 'Waiting for authorization', mcp: 'Loading tools' }
+        : { preparing: '准备连接', login: '登录连接', waiting_authorization: '等待授权', mcp: '加载工具' }
+      const reasons = english ? {
+        AUTH_TIMEOUT: 'Authorization timed out. Check whether the browser authorization was completed.',
+        AUTH_REJECTED: 'Authorization was rejected. Check the account and authorization permissions.',
+        NETWORK_TIMEOUT: 'The connection timed out. Check the network and service availability.',
+        NETWORK_ERROR: 'The service could not be reached. Check the network or proxy settings.',
+        HTTP_ERROR: 'The service returned an error. Check the HTTP status and service availability.',
+        PROTOCOL_ERROR: 'The service response was incompatible. Check the plugin and service versions.',
+        DEPENDENCY_ERROR: 'A plugin dependency is unavailable or incompatible. Check the installation.',
+        LOGIN_FAILED: 'Sign-in failed. Check the account and sign-in process.',
+        MCP_STARTUP_FAILED: 'The tool connection could not start. Check the plugin installation and service connection.',
+        STATE_UNAVAILABLE: 'The local connection state is unavailable. Check the profile directory and file permissions.',
+        CONNECTION_STOPPED: 'The connection process stopped. Check whether Harness is still running.',
+      } : {
+        AUTH_TIMEOUT: '等待授权超时，请检查浏览器中的授权是否完成。',
+        AUTH_REJECTED: '授权未通过，请检查登录账号及授权权限。',
+        NETWORK_TIMEOUT: '连接超时，请检查网络及服务是否可用。',
+        NETWORK_ERROR: '无法连接到服务，请检查网络或代理设置。',
+        HTTP_ERROR: '服务返回错误，请根据 HTTP 状态检查服务是否可用。',
+        PROTOCOL_ERROR: '服务响应不符合协议，请检查插件与服务版本是否兼容。',
+        DEPENDENCY_ERROR: '插件依赖不可用或不兼容，请检查安装是否完整。',
+        LOGIN_FAILED: '登录失败，请检查账号与登录流程。',
+        MCP_STARTUP_FAILED: '工具连接未能启动，请检查插件安装和服务连接。',
+        STATE_UNAVAILABLE: '无法读取本地连接状态，请检查 profile 目录及文件访问权限。',
+        CONNECTION_STOPPED: '连接进程已停止，请检查 Harness 是否仍在运行。',
+      }
+      const reason = Object.hasOwn(reasons, connection?.code) ? reasons[connection.code] : undefined
+      const detail = [Object.hasOwn(stages, connection?.stage) ? stages[connection.stage] : undefined,
+        onboardingConnectionCodes.includes(connection?.code) ? connection.code
+          : onboardingFailureCodes.includes(result.code) ? result.code : undefined,
+        Number.isInteger(connection?.http_status) && connection.http_status >= 100 && connection.http_status <= 599
+          ? `HTTP ${connection.http_status}` : undefined].filter(Boolean).join(' · ')
+      return createElement('section', { role: 'status', 'data-openagent-install-result': result.request_id,
+        style: { padding: '12px 14px', margin: '8px 0', border: '1px solid var(--dsw-alias-border-l1)',
+          borderRadius: '12px', background: 'var(--dsw-alias-button-floating-fill)', color: 'var(--dsw-alias-label-primary)', fontSize: '13px' } },
+      createElement('div', null, title),
+      reason ? createElement('div', { style: { marginTop: '6px' } }, reason) : null,
+      detail ? createElement('div', { style: { marginTop: '6px' } }, detail) : null,
+      createElement('div', { style: { marginTop: '6px' } }, english
+        ? 'This attempt has stopped without an automatic retry. Resolve the issue above; do not resend this onboarding prompt.'
+        : '本次已停止，未自动重试。请处理上述问题，不要重复发送本次引导提示。'))
+    }
     return createElement('section', {
       'data-openagent-install-result': result.request_id,
       style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px',
@@ -445,7 +537,8 @@ function startOnboardingClient(ctx, createElement) {
       name: 'conversation.chat.turnTail', id: 'openagent-installation-result', order: 30,
       inject: id => ({ hooks: { completion: completionFor(id) },
         openGuide: target => {
-          if (completionFor(id).getSnapshot()?.result.session_id === target) ctx.uiWorkspace.openSession(target)
+          const result = completionFor(id).getSnapshot()?.result
+          if (result?.status === 'completed' && result.session_id === target) ctx.uiWorkspace.openSession(target)
         } }),
     }, createOnboardingResultCard(createElement)))
   })

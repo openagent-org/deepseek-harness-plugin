@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { authRuntimeVersion, loadBridgeRuntime, runProxy } from './bridge.mjs'
+import { connectionFailure } from './onboarding-protocol.mjs'
 
 export const endpoint = 'https://openagent.org/mcp/v1/open-agent'
 export const headers = {
@@ -63,16 +64,25 @@ async function main() {
   process.argv = [process.execPath, entry, ...bridgeArguments()]
   let connected = false
   let timedOut = false
+  let stage = 'login'
+  let diagnostic
+  const reportFailure = error => { diagnostic = connectionFailure(error, stage); status(`OPENAGENT_CONNECTION_DIAGNOSTIC ${JSON.stringify(diagnostic)}`) }
   const status = message => process.stderr.write(`${message}\n`)
   // 上游会打印授权 URL、工具和资源正文；这里只输出固定阶段，不转发原始诊断。
-  console.error = (message) => {
+  console.error = (message, ...values) => {
     if (typeof message !== 'string') return
     if (/^\[\d+\] Connected successfully!$/.test(message) && !connected) {
       connected = true
       // npm 0.1.38 的诊断客户端覆盖了 onmessage；连接后正常关闭，避免两次无效的列表等待。
       if (!proxy) setImmediate(() => process.emit('SIGINT'))
     }
-    if (/^\[\d+\] Browser opened automatically\.$/.test(message)) status('OpenAgent 已打开浏览器，请完成授权。')
+    if (/^\[\d+\] Browser opened automatically\.$/.test(message)) {
+      stage = 'waiting_authorization'
+      status('OPENAGENT_LOGIN_WAITING_AUTHORIZATION')
+      status('请在打开的页面中登录 OpenAgent…')
+    }
+    if (/^\[\d+\] (Completing authorization|Recursively reconnecting for reason: auth-needed)/.test(message)) stage = 'login'
+    if (/^\[\d+\] (Connection error:|Authorization error:|Fatal error:)/.test(message)) reportFailure(values[0])
     if (/^\[\d+\] Could not open a browser automatically\./.test(message)) status('OpenAgent 无法自动打开浏览器；请检查本机浏览器环境后再手动登录。')
     if (proxy && /^\[\d+\] Fatal error:/.test(message)) status('OpenAgent MCP 连接失败；请检查连接和登录状态，不要自动重放业务调用。')
   }
@@ -80,6 +90,9 @@ async function main() {
     status('开始连接 OpenAgent；需要登录时将打开浏览器。')
     const timeout = setTimeout(() => {
       timedOut = true
+      reportFailure({ code: stage === 'waiting_authorization' ? 'AUTH_TIMEOUT' : 'NETWORK_TIMEOUT' })
+      // 无关 SIGINT listener 不能吞掉总期限；短暂清理后同一进程必须退出。
+      setTimeout(() => process.exit(1), 1000).unref()
       if (process.listenerCount('SIGINT')) process.emit('SIGINT')
       else process.exit(1)
     }, 330000)
@@ -87,6 +100,7 @@ async function main() {
     process.on('exit', code => {
       const success = code === 0 && connected && !timedOut
       if (!success && code === 0) process.exitCode = 1
+      if (!success && !diagnostic) reportFailure({ code: timedOut ? 'AUTH_TIMEOUT' : 'LOGIN_FAILED' })
       status(success ? 'OPENAGENT_LOGIN_CONNECTED：OpenAgent 登录连接完成；这不代表工具或业务验收通过。请另行核验 Harness 工具与 Skills。' : 'OpenAgent 登录连接未完成，已停止；不会自动重新执行登录。')
     })
   }
@@ -95,7 +109,9 @@ async function main() {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+  const proxy = process.argv[2] === '--proxy'
   main().catch(error => {
+    process.stderr.write(`OPENAGENT_CONNECTION_DIAGNOSTIC ${JSON.stringify(connectionFailure(error, proxy ? 'mcp' : 'preparing', proxy && error.code === 'OPENAGENT_MCP_CONNECT_FAILED' ? 'MCP_STARTUP_FAILED' : 'DEPENDENCY_ERROR'))}\n`)
     process.stderr.write(error.code === 'OPENAGENT_MCP_CONNECT_FAILED'
       ? 'OPENAGENT_MCP_CONNECT_FAILED：OpenAgent MCP 连接未完成；请检查网络和登录状态，不会自动重试。\n'
       : 'OpenAgent 连接启动失败；请检查依赖安装与专用认证目录权限。\n')

@@ -114,15 +114,17 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     return request
   }
 
-  claim(agent, clientId, requestId) {
+  async claim(agent, clientId, requestId) {
     const request = this.matchingClient(agent, clientId, requestId)
     if (!request || request.claimed) return { accepted: false }
+    request.claimed = true
+    const connection = await this.connectionDetails()
+    if (this.matchingClient(agent, clientId, requestId) !== request || this.finishConnection(request, connection)) return { accepted: false }
     const clients = this.visibleClients(agent.id)
     if (clients.length !== 1 || clients[0].key !== request.clientKey) {
       request.finish('failed', clients.length ? 'AMBIGUOUS_CLIENT' : 'NO_CLIENT')
       return { accepted: false }
     }
-    request.claimed = true
     return { accepted: true }
   }
 
@@ -137,6 +139,8 @@ export class OpenAgentOnboarding extends TypertRemoteService {
       return { accepted: false }
     }
     const failure = await this.readiness(target, request.signal)
+    const connection = await this.connectionDetails()
+    if (this.finishConnection(request, connection)) return { accepted: false }
     if (failure || request.result || request.signal.aborted || request.expiresAt <= Date.now()) {
       request.finish('failed', failure ?? 'REQUEST_EXPIRED')
       return { accepted: false }
@@ -174,6 +178,18 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     return clients.length === 1 && (key === undefined || clients[0].key === key) ? clients[0] : undefined
   }
 
+  async connectionDetails() {
+    try { return await this.store.connectionDetails() }
+    catch { return { status: 'unconfirmed', code: 'STATE_UNAVAILABLE' } }
+  }
+
+  finishConnection(request, connection) {
+    if (connection.status === 'ready') return false
+    request.finish(connection.status === 'failed' ? 'failed' : 'unconfirmed',
+      connection.status === 'failed' ? 'CONNECTION_FAILED' : 'CONNECTION_UNCONFIRMED', connection)
+    return true
+  }
+
   async readiness(agent, signal) {
     if (!this.hasRequiredTools(agent)) return 'MCP_UNAVAILABLE'
     try {
@@ -193,10 +209,18 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     let canReserve
     if (prepared) {
       const client = this.pendingClient(execution.agent)
-      if (!client || await this.readiness(execution.agent, signal)) return
+      if (!client) return
+      let connection = await this.connectionDetails()
+      if (connection.status === 'ready') {
+        const unavailable = await this.readiness(execution.agent, signal)
+        connection = await this.connectionDetails()
+        if (connection.status === 'ready' && unavailable) return
+      }
+      if (!['ready', 'failed', 'unconfirmed'].includes(connection.status)) return
       clientKey = client.key
       canReserve = () => !signal.aborted && Date.now() < preparedExpiresAt
-        && this.pendingClient(execution.agent, clientKey) !== undefined && this.hasRequiredTools(execution.agent)
+        && this.pendingClient(execution.agent, clientKey) !== undefined
+        && (connection.status !== 'ready' || this.hasRequiredTools(execution.agent))
       if (!canReserve()) return
     }
     // 只保存实际领取时源会话的可信轮次；后续聊天不会改变完成入口的位置。
@@ -213,14 +237,14 @@ export class OpenAgentOnboarding extends TypertRemoteService {
       calls: new Map(), skills: new Set(), guard: true }
     const abort = () => request.finish('unconfirmed', 'CALL_CANCELLED')
     const timer = setTimeout(() => request.finish('unconfirmed', 'VERIFICATION_TIMEOUT'), Math.max(0, request.expiresAt - Date.now()))
-    request.finish = (status, code) => {
+    request.finish = (status, code, connection) => {
       if (request.result) return
-      request.result = receipt(record, status, code)
+      request.result = { ...receipt(record, status, code), ...(connection ? { connection } : {}) }
       if (status === 'completed') Object.assign(request.result, { guide_loaded: true, guide_success: true, account_success: true, turn_completed: true })
       clearTimeout(timer)
       signal.removeEventListener('abort', abort)
       void this.store.complete(id, request.result).then(result => {
-        if (result.status !== 'completed' || record.sourceTurn === undefined) return
+        if (record.sourceTurn === undefined) return
         const completion = { sourceTurn: record.sourceTurn, locale: record.locale, result }
         for (const client of this.visibleClients(id)) client.send({ type: 'completed', sessionId: id, completion })
       }).catch(() => {
@@ -232,8 +256,11 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     this.targets.set(record.targetSessionId, request)
     signal.addEventListener('abort', abort, { once: true })
     if (signal.aborted) abort()
+    let connection = await this.connectionDetails()
+    if (this.finishConnection(request, connection)) return promise
     const unavailable = await this.readiness(execution.agent, signal)
-    if (request.result) return promise
+    connection = await this.connectionDetails()
+    if (request.result || this.finishConnection(request, connection)) return promise
     if (request.expiresAt <= Date.now()) request.finish('failed', 'REQUEST_EXPIRED')
     else if (prepared && !this.pendingClient(execution.agent, clientKey)) request.finish('failed', 'TARGET_NOT_READY')
     else if (unavailable) request.finish('failed', unavailable)
@@ -261,7 +288,12 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     if (!id || this.ctx.agents.get(id) !== execution.agent) return { status: 'failed', code: 'NO_SESSION' }
     const current = this.sources.get(id)
     if (current) return current.persisted ? current.result : receipt(current.record, 'unconfirmed', 'ONBOARDING_ALREADY_CLAIMED')
-    try { return await this.store.read(id) ?? await this.store.pendingStatus(id) ?? { status: 'failed', code: 'NO_ATTEMPT', connection_status: await this.store.connectionStatus() } }
+    try {
+      const result = await this.store.read(id) ?? await this.store.pendingStatus(id)
+      if (result) return result
+      const connection = await this.connectionDetails()
+      return { status: 'failed', code: 'NO_ATTEMPT', connection_status: connection.status, connection }
+    }
     catch { return { status: 'unconfirmed', code: 'STATE_UNAVAILABLE' } }
   }
 

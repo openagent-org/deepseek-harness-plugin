@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
+import { connectionFailure } from './onboarding-protocol.mjs'
 
 // 这是经过回归验证的 npm 0.1.38 制品接口，不是可随上游升级的公开 API。
 // 固定模块路径及运行版本；不搜索新 chunk、不修改依赖源码、不迁移认证内容。
@@ -41,7 +42,8 @@ export function bridgeTransports(local, remote, { onFailure = () => {}, onClosed
     failed = true
     onFailure(error)
     const http = Number.isInteger(error?.code) && error.code >= 100 && error.code <= 599 ? error.code : undefined
-    const data = { ...(diagnosticCodes.has(error?.code) ? { code: error.code } : {}), ...(http ? { http_status: http } : {}) }
+    const data = { connection_code: connectionFailure(error, 'mcp').code,
+      ...(diagnosticCodes.has(error?.code) ? { code: error.code } : {}), ...(http ? { http_status: http } : {}) }
     await Promise.allSettled([...pending].map(id => local.send({ jsonrpc: '2.0', id, error: {
       code: -32000, message: (remote.wasSent?.(id) === false
         ? error?.code === 'OPENAGENT_MCP_LOGIN_REQUIRED'
@@ -311,6 +313,7 @@ export async function runProxy(runtime, args, status) {
     closeBridge = bridgeTransports(local, remote, {
       onFailure: error => {
         process.exitCode = 1
+        status(`OPENAGENT_CONNECTION_DIAGNOSTIC ${JSON.stringify(connectionFailure(error, 'mcp'))}`)
         const http = Number.isInteger(error?.code) && error.code >= 100 && error.code <= 599 ? ` HTTP ${error.code}` : ''
         const code = diagnosticCodes.has(error?.code) ? ` ${error.code}` : ''
         status(`OPENAGENT_MCP_CONNECT_FAILED${http}${code}：OpenAgent MCP 连接未完成；未发送请求已停止，已发请求结果未确认，不会自动重试。`)
@@ -318,8 +321,9 @@ export async function runProxy(runtime, args, status) {
       onClosed: () => { authServer?.close(); process.exit(process.exitCode || 0) },
     })
     await local.start()
-  } catch {
+  } catch (error) {
     authServer?.close()
-    throw Object.assign(new Error('OpenAgent MCP 连接未完成。'), { code: 'OPENAGENT_MCP_CONNECT_FAILED' })
+    status(`OPENAGENT_CONNECTION_DIAGNOSTIC ${JSON.stringify(connectionFailure(error, 'mcp'))}`)
+    throw Object.assign(new Error('OpenAgent MCP 连接未完成。', { cause: error }), { code: 'OPENAGENT_MCP_CONNECT_FAILED' })
   }
 }

@@ -13,6 +13,7 @@ export const onboardingFailureCodes = [
   'SEND_REJECTED', 'SEND_UNCONFIRMED', 'CLIENT_DISCONNECTED', 'BRIDGE_DISPOSED', 'CALL_CANCELLED',
   'VERIFICATION_TIMEOUT', 'GUIDE_SKILL_FAILED', 'GUIDE_FAILED', 'ACCOUNT_FAILED',
   'UNEXPECTED_TOOL', 'DUPLICATE_TOOL', 'PROMPT_MISMATCH', 'TURN_FAILED', 'EVIDENCE_MISSING',
+  'CONNECTION_FAILED', 'CONNECTION_UNCONFIRMED',
 ]
 export function onboardingPrompt(locale) {
   if (locale === 'zh-CN') return 'OpenAgent 已安装，打开新用户引导'
@@ -26,6 +27,42 @@ const id = value => {
 const exact = (value, keys) => {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) {
     throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+  }
+  return value
+}
+export const onboardingConnectionCodes = [
+  'AUTH_TIMEOUT', 'AUTH_REJECTED', 'NETWORK_TIMEOUT', 'NETWORK_ERROR', 'HTTP_ERROR',
+  'PROTOCOL_ERROR', 'DEPENDENCY_ERROR', 'LOGIN_FAILED', 'MCP_STARTUP_FAILED',
+  'STATE_UNAVAILABLE', 'CONNECTION_STOPPED',
+]
+// 只提取已知错误类型与数字状态；不保留 message、stack、URL 或服务端正文。
+export function connectionFailure(error, stage, fallback = stage === 'mcp' ? 'MCP_STARTUP_FAILED' : 'LOGIN_FAILED') {
+  let code = fallback
+  let http_status
+  for (let current = error, depth = 0; current && depth < 5; current = current.cause, depth++) {
+    if (onboardingConnectionCodes.includes(current.data?.connection_code)) code = current.data.connection_code
+    else if (onboardingConnectionCodes.includes(current.code)) code = current.code
+    else if (['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', -32001].includes(current.code)
+      || current.name === 'TimeoutError') code = 'NETWORK_TIMEOUT'
+    else if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'].includes(current.code)) code = 'NETWORK_ERROR'
+    else if (['access_denied', 'invalid_grant', 'unauthorized_client', 'invalid_client', 'invalid_scope'].includes(current.errorCode)) code = 'AUTH_REJECTED'
+    else if (current.code === -32700 || current.code === -32600 || current.code === -32602 || current.name === 'ZodError') code = 'PROTOCOL_ERROR'
+    const http = current.data?.http_status ?? current.code
+    if (Number.isInteger(http) && http >= 100 && http <= 599) {
+      http_status = http
+      code = [401, 403].includes(http_status) ? 'AUTH_REJECTED' : 'HTTP_ERROR'
+    }
+  }
+  return { stage, code, ...(http_status ? { http_status } : {}) }
+}
+export function checkedConnection(value) {
+  exact(value, ['status', 'stage', 'code', 'http_status', 'started_at', 'updated_at'])
+  if (!['not_started', 'connecting', 'ready', 'failed', 'unconfirmed'].includes(value.status)
+    || ('stage' in value && !['preparing', 'login', 'waiting_authorization', 'mcp'].includes(value.stage))
+    || ('code' in value && !onboardingConnectionCodes.includes(value.code))
+    || ('http_status' in value && (!Number.isInteger(value.http_status) || value.http_status < 100 || value.http_status > 599))
+    || ['started_at', 'updated_at'].some(key => key in value && (!Number.isSafeInteger(value[key]) || value[key] <= 0))) {
+    throw new Error('OPENAGENT_ONBOARDING_INVALID_CONNECTION')
   }
   return value
 }
@@ -53,11 +90,14 @@ const message = codec('Message', value => {
     const completion = exact(value.completion, ['sourceTurn', 'locale', 'result'])
     if (!Number.isSafeInteger(completion.sourceTurn) || completion.sourceTurn <= 0) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
     onboardingPrompt(completion.locale)
-    const result = exact(completion.result, ['status', 'request_id', 'session_id', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed'])
+    const result = exact(completion.result, ['status', 'request_id', 'session_id', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed', 'code', 'connection'])
     id(result.request_id); id(result.session_id)
-    if (result.status !== 'completed' || ['guide_loaded', 'guide_success', 'account_success', 'turn_completed'].some(key => result[key] !== true)) {
-      throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
-    }
+    const evidence = ['guide_loaded', 'guide_success', 'account_success', 'turn_completed']
+    if (result.status === 'completed') {
+      if ('code' in result || 'connection' in result || evidence.some(key => result[key] !== true)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    } else if (!['failed', 'unconfirmed'].includes(result.status) || !onboardingFailureCodes.includes(result.code)
+      || evidence.some(key => key in result)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    if ('connection' in result) checkedConnection(result.connection)
   } else {
     exact(value, ['type', 'sessionId', 'requestId', 'targetSessionId', 'promptId', 'locale', 'cwd', 'workspaceId', 'expiresAt'])
     id(value.requestId); id(value.targetSessionId); id(value.promptId)

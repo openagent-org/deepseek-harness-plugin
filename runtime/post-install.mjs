@@ -6,7 +6,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { onboardingFailureCodes } from './onboarding-protocol.mjs'
+import { isDeepStrictEqual } from 'node:util'
+import { checkedConnection, onboardingFailureCodes } from './onboarding-protocol.mjs'
 
 const fail = () => { throw new Error('OPENAGENT_ONBOARDING_STATE_INVALID') }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -22,15 +23,17 @@ const checkedRecord = value => {
   return { targetSessionId: value.targetSessionId, requestId: value.requestId, promptId: value.promptId, locale: value.locale,
     ...('sourceTurn' in value ? { sourceTurn: value.sourceTurn } : {}) }
 }
-const resultKeys = ['status', 'request_id', 'session_id', 'code', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed']
+const evidenceKeys = ['guide_loaded', 'guide_success', 'account_success', 'turn_completed']
+const resultKeys = ['status', 'request_id', 'session_id', 'code', ...evidenceKeys, 'connection']
 const checkedResult = (value, record) => {
   exact(value, resultKeys)
   if (!['completed', 'failed', 'unconfirmed'].includes(value.status)
     || value.request_id !== record.requestId || value.session_id !== record.targetSessionId) fail()
   if (value.status === 'completed') {
-    if ('code' in value || resultKeys.slice(4).some(key => value[key] !== true)) fail()
+    if ('code' in value || 'connection' in value || evidenceKeys.some(key => value[key] !== true)) fail()
   } else if (!onboardingFailureCodes.includes(value.code)
-    || resultKeys.slice(4).some(key => key in value)) fail()
+    || evidenceKeys.some(key => key in value)) fail()
+  if ('connection' in value) checkedConnection(value.connection)
   return Object.fromEntries(resultKeys.filter(key => key in value).map(key => [key, value[key]]))
 }
 const unknown = record => ({ status: 'unconfirmed', code: 'ONBOARDING_ALREADY_CLAIMED',
@@ -99,11 +102,12 @@ export function createOnboardingStore({ profileDir, version }) {
     if (!await folder()) return null
     const value = await readJson(connectionPath)
     if (value === null) return null
-    exact(value, ['schema', 'version', 'attemptId', 'pid', 'phase'])
+    exact(value, ['schema', 'version', 'attemptId', 'pid', 'phase', 'stage', 'code', 'http_status', 'started_at', 'updated_at'])
     if (value.schema !== 1 || value.version !== version || typeof value.attemptId !== 'string'
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.attemptId)
       || !Number.isSafeInteger(value.pid) || value.pid <= 0 || value.pid > 2147483647
       || !['connecting', 'ready', 'failed', 'unconfirmed'].includes(value.phase)) fail()
+    checkedConnection({ status: value.phase, ...Object.fromEntries(['stage', 'code', 'http_status', 'started_at', 'updated_at'].filter(key => key in value).map(key => [key, value[key]])) })
     return value
   }
   const changeConnection = async change => {
@@ -124,22 +128,38 @@ export function createOnboardingStore({ profileDir, version }) {
     }
   }
   const store = {
-    async connectionStatus() {
+    async connectionDetails() {
       const value = await connectionRecord()
-      if (!value) return 'not_started'
+      if (!value) return { status: 'not_started' }
+      const details = { status: value.phase, ...Object.fromEntries(['stage', 'code', 'http_status', 'started_at', 'updated_at']
+        .filter(key => key in value).map(key => [key, value[key]])) }
       if (value.phase === 'connecting') {
         try { process.kill(value.pid, 0) }
-        catch (error) { if (error.code === 'ESRCH') return 'unconfirmed'; if (error.code !== 'EPERM') throw error }
+        catch (error) {
+          if (error.code === 'ESRCH') return { ...details, status: 'unconfirmed', code: 'CONNECTION_STOPPED' }
+          if (error.code !== 'EPERM') throw error
+        }
       }
-      return value.phase
+      return details
     },
+    async connectionStatus() { return (await store.connectionDetails()).status },
     async beginConnection() {
-      const value = await changeConnection(() => ({ schema: 1, version, attemptId: randomUUID(), pid: process.pid, phase: 'connecting' }))
+      const now = Date.now()
+      const value = await changeConnection(() => ({ schema: 1, version, attemptId: randomUUID(), pid: process.pid,
+        phase: 'connecting', stage: 'preparing', started_at: now, updated_at: now }))
       return value.attemptId
     },
-    async finishConnection(attemptId, phase) {
+    async advanceConnection(attemptId, stage) {
+      checkedConnection({ status: 'connecting', stage })
+      return !!await changeConnection(current => current?.attemptId === attemptId && current.phase === 'connecting'
+        ? { ...current, stage, updated_at: Date.now() } : null)
+    },
+    async finishConnection(attemptId, phase, diagnostic = {}) {
       if (!['ready', 'failed', 'unconfirmed'].includes(phase)) fail()
-      return !!await changeConnection(current => current?.attemptId === attemptId ? { ...current, phase } : null)
+      exact(diagnostic, ['stage', 'code', 'http_status'])
+      checkedConnection({ status: phase, ...diagnostic })
+      return !!await changeConnection(current => current?.attemptId === attemptId
+        ? { ...current, phase, ...diagnostic, updated_at: Date.now() } : null)
     },
     async reserve(source, record, canReserve) {
       id(source); record = checkedRecord(record)
@@ -164,7 +184,7 @@ export function createOnboardingStore({ profileDir, version }) {
       try { await writeExclusive(path, { schema: 1, version, sourceSessionId: source, result }) }
       catch (error) { if (error.code !== 'EEXIST') throw error }
       const completed = await receipt(source, state)
-      if (!completed || resultKeys.some(key => completed[key] !== result[key])) fail()
+      if (!completed || !isDeepStrictEqual(completed, result)) fail()
       return completed
     },
     async read(source) {
@@ -177,7 +197,7 @@ export function createOnboardingStore({ profileDir, version }) {
       id(source)
       const state = await load(source)
       const result = await receipt(source, state)
-      if (result?.status !== 'completed' || state.record.sourceTurn === undefined) return null
+      if (!result || state.record.sourceTurn === undefined) return null
       return { sourceTurn: state.record.sourceTurn, locale: state.record.locale, result }
     },
     async pendingStatus(source) {
@@ -192,8 +212,12 @@ export function createOnboardingStore({ profileDir, version }) {
       const after = await store.read(source)
       if (after) return after
       const ids = { request_id: value.record.requestId, session_id: value.record.targetSessionId }
+      const connection = await store.connectionDetails()
+      if (['failed', 'unconfirmed'].includes(connection.status)) return { status: connection.status, ...ids,
+        code: connection.status === 'failed' ? 'CONNECTION_FAILED' : 'CONNECTION_UNCONFIRMED',
+        connection_status: connection.status, connection }
       return value.expiresAt > Date.now()
-        ? { status: 'pending', ...ids, expires_at: value.expiresAt, connection_status: await store.connectionStatus() }
+        ? { status: 'pending', ...ids, expires_at: value.expiresAt, connection_status: connection.status, connection }
         : { status: 'unconfirmed', ...ids, code: 'ONBOARDING_REQUEST_EXPIRED' }
     },
     async pending() {
@@ -233,8 +257,7 @@ export async function prepareOnboarding({ profileDir, version, sourceSessionId, 
   if (after) return after
   const pending = requests.find(item => item.sourceSessionId === sourceSessionId)
   if (!pending) return { status: 'unconfirmed', code: 'ONBOARDING_REQUEST_EXPIRED' }
-  return { status: 'pending', request_id: pending.record.requestId, session_id: pending.record.targetSessionId,
-    expires_at: pending.expiresAt, connection_status: await store.connectionStatus() }
+  return store.pendingStatus(sourceSessionId)
 }
 
 async function main() {
@@ -275,10 +298,13 @@ async function main() {
   const packageJson = await readJson(join(installed, 'package.json'), false)
   if (packageJson?.name !== 'dsh-openagent' || !versionOk(packageJson.version)) fail()
   const store = createOnboardingStore({ profileDir, version: packageJson.version })
-  const result = options.action === '--prepare'
+  let result = options.action === '--prepare'
     ? await prepareOnboarding({ profileDir, version: packageJson.version, sourceSessionId, locale: options['--locale'] ?? 'zh-CN' })
     : await store.pendingStatus(sourceSessionId)
-      ?? { status: 'failed', code: 'NO_ATTEMPT', connection_status: await store.connectionStatus() }
+  if (!result) {
+    const connection = await store.connectionDetails()
+    result = { status: 'failed', code: 'NO_ATTEMPT', connection_status: connection.status, connection }
+  }
   console.log(`${options.action === '--prepare' && result.status === 'pending' ? 'OPENAGENT_ONBOARDING_PREPARED' : 'OPENAGENT_ONBOARDING_STATE'} ${JSON.stringify(result)}`)
 }
 
