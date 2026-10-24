@@ -6,6 +6,7 @@ import { createOnboardingStore } from './post-install.mjs'
 import { onboardingRemote, onboardingPrompt, onboardingSkills, onboardingGuideTool, onboardingAccountTool } from './onboarding-protocol.mjs'
 
 const TIMEOUT_MS = 600000
+const PENDING_POLL_MS = 2000
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const exactArgs = (value, keys) => object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
 const sourceId = execution => execution.agent?.id
@@ -44,11 +45,22 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     ctx.tools.guard(execution => this.beforeTool(execution))
     ctx.on('tools/result', (execution, result) => { this.observeTool(execution, result) })
     ctx.on('agent/status', ({ agent, status }) => { if (status === 'idle') void this.resumePending(agent) })
-    ctx.effect(() => () => {
-      this.lifetime.abort()
-      for (const request of this.requests.values()) request.finish('unconfirmed', 'BRIDGE_DISPOSED')
-      for (const client of this.clients.values()) client.stop()
-      this.clients.clear()
+    ctx.effect(() => {
+      // CLI 可在 watch 已建立、原会话已空闲之后才写入预约；只观察可见会话。
+      const pendingTimer = setInterval(() => {
+        for (const id of new Set([...this.clients.values()].map(client => client.sessionId))) {
+          const agent = this.ctx.agents.get(id)
+          if (agent) void this.resumePending(agent)
+        }
+      }, PENDING_POLL_MS)
+      pendingTimer.unref()
+      return () => {
+        clearInterval(pendingTimer)
+        this.lifetime.abort()
+        for (const request of this.requests.values()) request.finish('unconfirmed', 'BRIDGE_DISPOSED')
+        for (const client of this.clients.values()) client.stop()
+        this.clients.clear()
+      }
     }, 'openagent-onboarding.lifecycle')
   }
 
@@ -142,8 +154,17 @@ export class OpenAgentOnboarding extends TypertRemoteService {
 
   visibleClients(id) { return [...this.clients.values()].filter(client => client.sessionId === id) }
 
+  hasRequiredTools(agent) { return [onboardingGuideTool, onboardingAccountTool, 'skill'].every(name => this.ctx.tools.get(name, agent)) }
+
+  pendingClient(agent, key) {
+    if (this.lifetime.signal.aborted || this.ctx.agents.get(agent.id) !== agent || agent.status !== 'idle'
+      || agent.inbox.nextTurn.length || agent.inbox.nextStep.length) return undefined
+    const clients = this.visibleClients(agent.id)
+    return clients.length === 1 && (key === undefined || clients[0].key === key) ? clients[0] : undefined
+  }
+
   async readiness(agent, signal) {
-    if (![onboardingGuideTool, onboardingAccountTool, 'skill'].every(name => this.ctx.tools.get(name, agent))) return 'MCP_UNAVAILABLE'
+    if (!this.hasRequiredTools(agent)) return 'MCP_UNAVAILABLE'
     try {
       const snapshot = await this.ctx.skills.snapshot({ scope: agent, cwd: this.ctx.workingDirectory.get(agent.session), signal })
       if (!snapshot.complete || !onboardingSkills.every(name => snapshot.skills.some(skill => skill.name === name && skill.provider === 'openagent' && skill.invocation.modelInvocable))) return 'SKILLS_UNAVAILABLE'
@@ -156,10 +177,21 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     if (this.sources.has(id)) return this.sources.get(id).promise
     const record = prepared ?? { requestId: randomUUID(), targetSessionId: randomUUID(), promptId: randomUUID(), locale: args.locale }
     try { onboardingPrompt(record.locale) } catch { return receipt(record, 'failed', 'INVALID_LOCALE') }
-    let reserved
-    try { reserved = await this.store.reserve(id, record) } catch { return receipt(record, 'failed', 'STATE_UNAVAILABLE') }
-    if (!reserved.reserved) return reserved.result
     const signal = AbortSignal.any([execution.signal, this.lifetime.signal])
+    let clientKey
+    let canReserve
+    if (prepared) {
+      const client = this.pendingClient(execution.agent)
+      if (!client || await this.readiness(execution.agent, signal)) return
+      clientKey = client.key
+      canReserve = () => !signal.aborted && Date.now() < preparedExpiresAt
+        && this.pendingClient(execution.agent, clientKey) !== undefined && this.hasRequiredTools(execution.agent)
+      if (!canReserve()) return
+    }
+    let reserved
+    try { reserved = await this.store.reserve(id, record, canReserve) } catch { return receipt(record, 'failed', 'STATE_UNAVAILABLE') }
+    if (reserved.deferred) return
+    if (!reserved.reserved) return reserved.result
     let resolve
     const promise = new Promise(done => { resolve = done })
     const request = { sourceId: id, record, promise, signal, expiresAt: Math.min(Date.now() + TIMEOUT_MS, preparedExpiresAt),
@@ -184,7 +216,7 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     const unavailable = await this.readiness(execution.agent, signal)
     if (request.result) return promise
     if (request.expiresAt <= Date.now()) request.finish('failed', 'REQUEST_EXPIRED')
-    else if (prepared && (execution.agent.status !== 'idle' || execution.agent.inbox.nextTurn.length || execution.agent.inbox.nextStep.length)) request.finish('failed', 'TARGET_NOT_READY')
+    else if (prepared && !this.pendingClient(execution.agent, clientKey)) request.finish('failed', 'TARGET_NOT_READY')
     else if (unavailable) request.finish('failed', unavailable)
     else {
       const clients = this.visibleClients(id)
@@ -204,17 +236,16 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     if (!id || this.ctx.agents.get(id) !== execution.agent) return { status: 'failed', code: 'NO_SESSION' }
     const current = this.sources.get(id)
     if (current) return current.persisted ? current.result : receipt(current.record, 'unconfirmed', 'ONBOARDING_ALREADY_CLAIMED')
-    try { return await this.store.read(id) ?? { status: 'failed', code: 'NO_ATTEMPT' } }
+    try { return await this.store.read(id) ?? await this.store.pendingStatus(id) ?? { status: 'failed', code: 'NO_ATTEMPT', connection_status: await this.store.connectionStatus() } }
     catch { return { status: 'unconfirmed', code: 'STATE_UNAVAILABLE' } }
   }
 
   async resumePending(agent) {
-    if (this.lifetime.signal.aborted || this.resuming.has(agent.id) || agent.status !== 'idle'
-      || agent.inbox.nextTurn.length || agent.inbox.nextStep.length || this.visibleClients(agent.id).length !== 1) return
+    if (this.resuming.has(agent.id) || !this.pendingClient(agent)) return
     this.resuming.add(agent.id)
     try {
       const entry = (await this.store.pending()).find(item => item.sourceSessionId === agent.id && item.expiresAt > Date.now())
-      if (entry && agent.status === 'idle' && !agent.inbox.nextTurn.length && !agent.inbox.nextStep.length) {
+      if (entry && this.pendingClient(agent)) {
         await this.start({ locale: entry.record.locale }, { agent, signal: this.lifetime.signal }, entry.record, entry.expiresAt)
       }
     } catch { this.ctx.logger.warn('OPENAGENT_ONBOARDING_PENDING_UNAVAILABLE') }

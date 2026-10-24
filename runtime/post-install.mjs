@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 安装预约只保存一次发送所需的标识；不重启应用，不读取认证或会话正文。
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -92,12 +92,59 @@ export function createOnboardingStore({ profileDir, version }) {
     if (!state || value.schema !== 1 || value.version !== version || value.sourceSessionId !== source) fail()
     return checkedResult(value.result, state.record)
   }
+  const connectionPath = join(root, 'connection.json')
+  const connectionRecord = async () => {
+    if (!await folder()) return null
+    const value = await readJson(connectionPath)
+    if (value === null) return null
+    exact(value, ['schema', 'version', 'attemptId', 'pid', 'phase'])
+    if (value.schema !== 1 || value.version !== version || typeof value.attemptId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.attemptId)
+      || !Number.isSafeInteger(value.pid) || value.pid <= 0 || value.pid > 2147483647
+      || !['connecting', 'ready', 'failed', 'unconfirmed'].includes(value.phase)) fail()
+    return value
+  }
+  const changeConnection = async change => {
+    await folder(true)
+    // 只释放本次独占创建的锁；旧锁或并发写入一律停止，不自动接管。
+    const lockPath = join(root, 'connection.lock')
+    const lock = await open(lockPath, 'wx', 0o600)
+    const temporary = join(root, `.connection-${randomUUID()}.tmp`)
+    try {
+      const next = change(await connectionRecord())
+      if (!next) return false
+      await writeExclusive(temporary, next)
+      await rename(temporary, connectionPath)
+      return next
+    } finally {
+      try { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error }) }
+      finally { await lock.close(); await unlink(lockPath) }
+    }
+  }
   const store = {
-    async reserve(source, record) {
+    async connectionStatus() {
+      const value = await connectionRecord()
+      if (!value) return 'not_started'
+      if (value.phase === 'connecting') {
+        try { process.kill(value.pid, 0) }
+        catch (error) { if (error.code === 'ESRCH') return 'unconfirmed'; if (error.code !== 'EPERM') throw error }
+      }
+      return value.phase
+    },
+    async beginConnection() {
+      const value = await changeConnection(() => ({ schema: 1, version, attemptId: randomUUID(), pid: process.pid, phase: 'connecting' }))
+      return value.attemptId
+    },
+    async finishConnection(attemptId, phase) {
+      if (!['ready', 'failed', 'unconfirmed'].includes(phase)) fail()
+      return !!await changeConnection(current => current?.attemptId === attemptId ? { ...current, phase } : null)
+    },
+    async reserve(source, record, canReserve) {
       id(source); record = checkedRecord(record)
       await folder(true)
       const existing = await store.read(source)
       if (existing) return { reserved: false, result: existing }
+      if (canReserve && !canReserve()) return { reserved: false, deferred: true }
       const value = { schema: 1, version, sourceSessionId: source, record }
       try { await writeExclusive(join(root, `${hash(source)}.json`), value); return { reserved: true } }
       catch (error) {
@@ -123,6 +170,22 @@ export function createOnboardingStore({ profileDir, version }) {
       const state = await load(source)
       if (!await folder()) return null
       return await receipt(source, state) ?? (state ? unknown(state.record) : null)
+    },
+    async pendingStatus(source) {
+      id(source)
+      const existing = await store.read(source)
+      if (existing) return existing
+      if (!await folder()) return null
+      const value = await readJson(join(root, `${hash(source)}.pending.json`))
+      if (value === null) return null
+      validate(value, source, true)
+      // 读取预约期间可能已被 Host 领取；领取结果始终优先，不能报成未发送。
+      const after = await store.read(source)
+      if (after) return after
+      const ids = { request_id: value.record.requestId, session_id: value.record.targetSessionId }
+      return value.expiresAt > Date.now()
+        ? { status: 'pending', ...ids, expires_at: value.expiresAt, connection_status: await store.connectionStatus() }
+        : { status: 'unconfirmed', ...ids, code: 'ONBOARDING_REQUEST_EXPIRED' }
     },
     async pending() {
       if (!await folder()) return []
@@ -161,7 +224,8 @@ export async function prepareOnboarding({ profileDir, version, sourceSessionId, 
   if (after) return after
   const pending = requests.find(item => item.sourceSessionId === sourceSessionId)
   if (!pending) return { status: 'unconfirmed', code: 'ONBOARDING_REQUEST_EXPIRED' }
-  return { status: 'pending', request_id: pending.record.requestId, session_id: pending.record.targetSessionId, expires_at: pending.expiresAt }
+  return { status: 'pending', request_id: pending.record.requestId, session_id: pending.record.targetSessionId,
+    expires_at: pending.expiresAt, connection_status: await store.connectionStatus() }
 }
 
 async function main() {
@@ -169,18 +233,20 @@ async function main() {
   const args = process.argv.slice(2)
   for (let i = 0; i < args.length; i++) {
     const key = args[i]
-    if (key === '--prepare' && !options.prepare) options.prepare = true
+    if (['--prepare', '--status'].includes(key) && !options.action) options.action = key
     else if (['--profile', '--locale', '--session-id'].includes(key) && !(key in options) && args[i + 1] !== undefined) options[key] = args[++i]
     else fail()
   }
   const profileName = options['--profile']
-  if (!options.prepare || typeof profileName !== 'string' || !profileName || ['.', '..', 'node_modules'].includes(profileName)
+  if (!options.action || typeof profileName !== 'string' || !profileName || ['.', '..', 'node_modules'].includes(profileName)
     || /[/\\\x00-\x1f]/.test(profileName)) fail()
+  if (process.env.DSH_PROFILE && process.env.DSH_PROFILE !== profileName) fail()
   const sourceSessionId = process.env.DSH_SESSION_ID || options['--session-id']
   if (process.env.DSH_SESSION_ID && options['--session-id'] && process.env.DSH_SESSION_ID !== options['--session-id']) fail()
   id(sourceSessionId)
   const home = resolve(process.env.DSH_HOME?.trim() ? process.env.DSH_HOME : join(homedir(), '.dsh'))
   const profileDir = join(home, 'profiles', profileName)
+  if (process.env.DSH_PROFILE_DIR && resolve(process.env.DSH_PROFILE_DIR) !== profileDir) fail()
   for (const path of [home, join(home, 'profiles'), profileDir, join(profileDir, 'node_modules')]) {
     await inspect(path, true)
     if (await realpath(path) !== path) fail()
@@ -199,10 +265,14 @@ async function main() {
   if (!installed.startsWith(join(profileDir, 'node_modules') + sep) || installed !== dirname(dirname(fileURLToPath(import.meta.url)))) fail()
   const packageJson = await readJson(join(installed, 'package.json'), false)
   if (packageJson?.name !== 'dsh-openagent' || !versionOk(packageJson.version)) fail()
-  const result = await prepareOnboarding({ profileDir, version: packageJson.version, sourceSessionId, locale: options['--locale'] ?? 'zh-CN' })
-  console.log(`${result.status === 'pending' ? 'OPENAGENT_ONBOARDING_PREPARED' : 'OPENAGENT_ONBOARDING_STATE'} ${JSON.stringify(result)}`)
+  const store = createOnboardingStore({ profileDir, version: packageJson.version })
+  const result = options.action === '--prepare'
+    ? await prepareOnboarding({ profileDir, version: packageJson.version, sourceSessionId, locale: options['--locale'] ?? 'zh-CN' })
+    : await store.pendingStatus(sourceSessionId)
+      ?? { status: 'failed', code: 'NO_ATTEMPT', connection_status: await store.connectionStatus() }
+  console.log(`${options.action === '--prepare' && result.status === 'pending' ? 'OPENAGENT_ONBOARDING_PREPARED' : 'OPENAGENT_ONBOARDING_STATE'} ${JSON.stringify(result)}`)
 }
 
 if (process.argv[1] && await realpath(process.argv[1]).catch(() => '') === fileURLToPath(import.meta.url)) {
-  await main().catch(() => { console.error('OpenAgent 自动验收预约未完成：来源、状态或文件权限无法核实；未发送消息，也未重启客户端。'); process.exitCode = 1 })
+  await main().catch(() => { console.error('OpenAgent 自动验收状态操作未完成：来源、状态或文件权限无法核实；本命令未发送消息，也未重启客户端。'); process.exitCode = 1 })
 }

@@ -1,162 +1,128 @@
 # Install OpenAgent: DeepSeek Harness
 
-The installation Agent in DeepSeek Harness must execute the four steps below, including installation, sign-in, and verification in a new conversation. Do not merely hand the user commands. Prefer a new conversation in **Creator** mode; continue in the current conversation if it already exposes `plugin_manager`. The user handles required approvals and browser authorization, without providing passwords or Tokens.
+The installation Agent must execute these steps in the current ordinary conversation and complete one verification in a new conversation. Do not merely hand the user commands. The user handles required approvals and browser authorization without supplying passwords or Tokens.
 
-This guide was checked against Harness `0.2.1-rc.2` and supports local Desktop, Web, and CLI on `>=0.2.1-rc.2 <0.3.0`. The displayed plugin name is **OpenAgent**; its internal package name in tool arguments and installation paths remains `dsh-openagent`.
+This guide was checked against Harness `0.2.1-rc.2` and supports local Desktop, Web, and CLI on `>=0.2.1-rc.2 <0.3.0`. The displayed plugin name is **OpenAgent**; its internal package name is `dsh-openagent`. Online installation relies on the host's profile hot loading. A successful installation command does not prove OAuth, tool availability, or new-conversation verification.
 
-## 1. Confirm the current environment and native tools
+## 1. Check the current host and execution tools
 
-Confirm that this is DeepSeek Harness on the target machine and check its version. Inspect the current conversation's actual tools for `plugin_manager`, the platform's `bash` or `pwsh`, and `job_output`. Confirm that the selected shell's actual schema supports `run_in_background: true`; otherwise stop and report missing background execution support. If the installation tool is missing, explain that this mode cannot complete automatic installation and ask the user to start a new Creator conversation with this guide. A conversation cannot switch presets after its first turn. Do not edit YAML, disable approvals, or launch `dsh plugin` from the current chat to add missing tools.
+Use the ordinary conversation's actual `bash` or `pwsh` and `job_output` tools. Check that the shell schema supports `description`, `command`, `run_in_background: true`, `sandbox_permissions: "danger-full-access"`, and `justification`. Installation and preparation write to the current Harness profile: request the required access on the first call for each operation without changing global permissions. Stop if tools or arguments are unavailable or approval is denied or cancelled; do not retry through another entry point.
 
-Use the native shell to check only the host-injected `DSH_HOME`, `DSH_PROFILE`, `DSH_PROFILE_DIR`, and `DSH_SESSION_ID`. Keep using those verified values. Stop if they are missing or identify the wrong target; do not guess a profile, redirect the variables to another profile, or read credential files.
+Through the shell, check only the host-injected `DSH_HOME`, `DSH_PROFILE`, `DSH_PROFILE_DIR`, and `DSH_SESSION_ID`, preserving their values. Confirm that the profile directory belongs to that home, current client, and original installation conversation. Stop if values are missing or inconsistent; do not guess another profile or read credentials or conversation contents.
 
-Check Git and Node.js: Node `22.19+` on the 22 series or `24+` is required. When available, use the absolute Node path returned by `load_workspace_dependencies`; otherwise use a verified Node already configured in the environment. Replace `<absolute Node path>` below with that path and quote it correctly. Desktop does not need a separate dsh installation.
+Verify Git, Node, and dsh versions and their installation sources. Node must be `22.19+` in the 22 series or `24+`; the absolute Node path returned by `load_workspace_dependencies` may be used. For Desktop, locate `resources/runtime/cli/bin/dsh` inside the **currently running application**, or `dsh.cmd` on Windows; on macOS it is under `Contents/Resources/runtime/cli/bin/dsh`. Do not guess a fixed application name or install npm dsh separately. For non-Desktop hosts, use dsh from the same installation as the current Host. Check `--version` through its absolute path, then replace and correctly quote the placeholder paths below.
 
-`plugin_manager` checks `danger-full-access` for each call: it proceeds if the session already has that access; otherwise the host requests approval for that operation. Do not add shell permission arguments to it or change the session's global permission mode. Sign-in and preparation write to Harness-specific directories. Before executing them, confirm that the native shell's actual schema supports `sandbox_permissions: "danger-full-access"` and `justification`, and request the required access on the first call. Stop if those arguments are unavailable or approval is denied or cancelled; do not retry through another entry point.
+Read only the relevant dependency source, `dsh.profile.bundles`, disablement records, and installed package name and version from the current profile and package; do not print entire configuration files. Accept only the official GitHub/Gitee repositories below at `rel`, including equivalent package-manager representations. Preserve an existing trusted installation without adding it again. Stop for an existing disablement, an older package lacking this guide's status command, an unknown same-name source, abnormal files, or unconfirmed local changes; use the maintenance procedure without silently enabling or overwriting it.
 
-## 2. Install through the native tool, without enabling yet
+## 2. Install once with the current host's CLI
 
-First call `plugin_manager`:
+Run this only when the plugin is not installed. First tell the user: “Installing and connecting OpenAgent. If an authorization page opens, please complete authorization there.”
 
-```json
-{"action":"list_bundles","limit":100}
-```
-
-Parse the JSON string returned by the tool. When `nextOffset` is non-null, continue with that value as `offset` until the target is found or the list ends. Inspect the entry with `name="dsh-openagent"` and its `source`, `version`, `installed`, and `enabled` fields. Its source must actually match the `rel` branch of the official GitHub or Gitee repositories below. Do not use the `official` boolean for this check; it identifies membership in Harness's built-in catalog.
-
-Preserve an existing installation from that source and continue. For `already-installed`, reread the actual entry without removing and reinstalling it. Use “Update and removal” below only when an update is explicitly needed. Stop for an unknown same-name source, abnormal files, or unreviewed local changes rather than overwriting them.
-
-If it is not installed, call `plugin_manager` once with activation explicitly disabled:
-
-```json
-{"action":"install_bundle","target":"git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel","enabled":false}
-```
-
-Wait for the same call to finish, then reread the package name, version, and source with `list_bundles`. Continue only after installation explicitly succeeds and the target package is readable. For `failed`, `cancelled`, `overridden`, or an unknown outcome, report the stage and stop without repeating installation. Preserve `restart-required` and follow the preparation branch in step 4 after sign-in.
-
-Only a confirmed Git download failure caused by DNS, connection, timeout, interrupted transport, or HTTP 5xx permits one further download after the original operation has ended. Change `target` to `git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel`. Approval denial, certificate errors, 401/403/404/429/451, validation, dependency builds, enablement, or OAuth failures do not permit switching sources. If `pendingBuilds` is returned, report the build-script approval blocker and stop; do not add `approvedBuilds` or relax version compatibility checks.
-
-The native manager owns this profile's dependencies and plugin selection. Preserve other plugins, models, conversations, and configuration. Do not delete the profile or use `--from-default-profile`.
-
-## 3. Sign in once, then enable natively
-
-First check for trusted evidence of successful sign-in to this same endpoint and a usable connection; if present, skip duplicate sign-in. If an enabled plugin is already authorizing, wait for that attempt without starting a parallel login command. Authorize only `https://openagent.org/mcp/v1/open-agent`; do not copy, rewrite, or reuse authentication records from a different endpoint.
-
-When sign-in is needed, tell the user: “I am connecting OpenAgent. If an authorization page opens, complete authorization there; I will wait for the same process.” The installation Agent selects one native shell call for the platform, replaces the Node path, and runs it once.
-
-On macOS / Linux, use `bash`:
+For macOS / Linux, call `bash`:
 
 ```json
 {
-  "description": "Connect OpenAgent and wait for browser authorization",
-  "command": "\"<absolute Node path>\" \"$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/login.mjs\"",
+  "description": "Install OpenAgent in the current Harness profile",
+  "command": ": \"${DSH_HOME:?Missing current Harness home}\" \"${DSH_PROFILE:?Missing current profile}\" \"${DSH_PROFILE_DIR:?Missing current profile directory}\" \"${DSH_SESSION_ID:?Missing current conversation ID}\"; \"<absolute dsh path>\" plugin --profile \"$DSH_PROFILE\" add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
-  "justification": "This sign-in needs to write the current Harness OpenAgent authentication directory and complete browser authorization."
+  "justification": "This installation downloads the official plugin and writes to the current Harness profile so the host can load OpenAgent."
 }
 ```
 
-On Windows, use `pwsh`:
+For Windows, call `pwsh`:
 
 ```json
 {
-  "description": "Connect OpenAgent and wait for browser authorization",
-  "command": "& '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/login.mjs')",
+  "description": "Install OpenAgent in the current Harness profile",
+  "command": "if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw 'Missing current Harness profile or conversation ID' }; & '<absolute dsh.cmd path>' plugin --profile $env:DSH_PROFILE add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
-  "justification": "This sign-in needs to write the current Harness OpenAgent authentication directory and complete browser authorization."
+  "justification": "This installation downloads the official plugin and writes to the current Harness profile so the host can load OpenAgent."
 }
 ```
 
-Keep the actual returned `jobId` and use `job_output` to wait for that same job, for at most 60 seconds per call:
+Wait for the same installation task using its actual `jobId`, for at most 60 seconds per call:
 
 ```json
-{"job_id":"<jobId returned above>","wait":true,"timeout_ms":60000}
+{"job_id":"<jobId from the preceding call>","wait":true,"timeout_ms":60000}
 ```
 
-A short wait ending is not a sign-in failure. If the job is running, keep waiting without rerunning the command. Confirm sign-in only when the original command exits with code 0 and outputs `OPENAGENT_LOGIN_CONNECTED`. Stop on cancellation, failure, timeout, or an unknown outcome and report the stage and public error. The sign-in entry opens the authorization page; do not open another URL or print credential files, complete authorization URLs, or raw logs.
+Keep waiting on that task while it is running; do not reinstall. Only a confirmed Git download failure caused by DNS, connection, timeout, interrupted transport, or HTTP 5xx allows one further download from `git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel` after the original process has ended. Do not switch sources for approval denial, certificate errors, 401/403/404/429/451, validation, builds, compatibility, loading, or OAuth issues. Do not grant build-script permissions or add version exemptions. Preserve the state and stop on other failures, cancellation, or unknown outcomes without replaying commands.
 
-After sign-in succeeds, call `plugin_manager`:
+The CLI adds the new bundle to the enabled list, and the host first attempts online loading. Whenever the bundle loads, the plugin runs its bundled sign-in connection check once without automatic retries. Existing valid authorization is reused without reopening the authorization page. MCP mounts only after that same process outputs `OPENAGENT_LOGIN_CONNECTED` and exits with code 0. First authorization has a 330-second total limit, including 300 seconds for browser authorization, preventing native MCP initialization and probing from cutting authorization short. **Do not run `runtime/login.mjs` separately in the shell, reopen the authorization URL, or start a concurrent sign-in.** That entry reuses valid sign-in for the same endpoint. Authorize only `https://openagent.org/mcp/v1/open-agent`; do not copy, rewrite, or reuse authentication records from a different endpoint.
 
-```json
-{"action":"set_bundle","target":"dsh-openagent","enabled":true}
-```
+After the installation process exits with code 0, reread the installed package name, version, official source, and enabled list, and confirm that no disablement record applies. Then continue to step 3. Report only that installation files are ready; do not infer a working connection from the exit code. Preserve other plugins, models, conversations, and configuration. Do not delete the profile or use `--from-default-profile`.
 
-Reread the target bundle and actual tool catalog. `application="applied"` proves only that configuration was applied. When MCP tools and Skills are usable, proceed directly to step 4 without exiting or restarting. An explicit `restart-required` result leads to the preparation branch below. Stop for other failures or unknown outcomes; “enabled” is not verification, and missing tools are not a reason to sign in again.
+## 3. Prepare once and end the current turn
 
-## 4. Automatically verify in a new conversation and deliver the result
-
-When no preparation exists and verification has not started, the installation Agent calls `openagent_install_verify` once from the original installation conversation:
-
-```json
-{"locale":"en"}
-```
-
-Keep the original installation conversation visible in exactly one target Desktop / Web window. The tool checks the actual MCP tools and five business Skills, creates and displays a new conversation, sends “OpenAgent installed. Open the new user guide.” once, and preserves the original conversation's draft. Do not create another conversation, send the prompt manually, or ask the user to send it again.
-
-Report “OpenAgent installation and account verification passed; you can continue in the new conversation” only when `status="completed"` and `guide_loaded`, `guide_success`, `account_success`, and `turn_completed` are all strictly `true`. This requires the new conversation to actually load the guide Skill, receive `view=onboarding/status=ready` from the guide, receive strict `success=true` from one account call, and finish that turn normally. Tool listings, OAuth success, and model prose cannot substitute for this evidence.
-
-One verification attempt waits at most 600 seconds. If the original call times out or its outcome is unknown, call the read-only `openagent_install_status` once:
-
-```json
-{}
-```
-
-Report the existing state without calling verify again or changing conversations to bypass its record. `NO_ATTEMPT` does not override a preparation that has not started and is not permission to send another prompt. On failure, report “OpenAgent installation verification is incomplete,” the stage, and the public error. Do not repeat the guide, account call, or OAuth, read Tokens, connect directly to MCP, or delete state to bypass verification.
-
-### Prepare only when native management explicitly requires reopening
-
-Only when the result explicitly says `restart-required` and there is no preparation, prior verify call, or verification conversation, run one preparation command below from the original installation conversation. Use the Node path and host-injected variables verified in step 1. Request `sandbox_permissions: "danger-full-access"` on the native `bash` / `pwsh` call with a `justification` explaining “Save a one-time new-conversation verification request for this installation conversation.” Run the short command and wait for its exit without closing the application.
+First query status once in the original installation conversation through a read-only entry point in step 4. Run the first `--prepare` only if this installation has never called `--prepare` or `openagent_install_verify`, has no known verification conversation, and the query returns `NO_ATTEMPT` with `connection_status` equal to `not_started`, `connecting`, or `ready`. Preserve any existing preparation or attempt. Stop if `NO_ATTEMPT` follows a previous attempt, or the connection is `failed` / `unconfirmed`, missing, or invalid; do not prepare, extend expiry, or resend. Use the Node path and host variables checked in step 1. Request `sandbox_permissions: "danger-full-access"` on the native shell call with a `justification` explaining “Save one new-conversation verification request for the original installation conversation.” Wait for the short command to exit without closing the application.
 
 Bash:
 
 ```bash
-: "${DSH_PROFILE:?Current profile is missing}" "${DSH_PROFILE_DIR:?Current profile directory is missing}" "${DSH_SESSION_ID:?Current conversation ID is missing}"
+: "${DSH_HOME:?Missing current Harness home}" "${DSH_PROFILE:?Missing current profile}" "${DSH_PROFILE_DIR:?Missing current profile directory}" "${DSH_SESSION_ID:?Missing current conversation ID}"
 "<absolute Node path>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale en
 ```
 
 PowerShell:
 
 ```powershell
-if (-not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw 'Current Harness profile or conversation ID is missing' }
+if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw 'Missing current Harness profile or conversation ID' }
 & '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale en
 ```
 
-Only a successful command exit with `OPENAGENT_ONBOARDING_PREPARED` permits reporting: “The installation files are ready and automatic verification is scheduled. After all tasks finish, quit and reopen Harness normally, then return to this installation conversation within 30 minutes.” End this turn. Once the original conversation is idle and uniquely visible and MCP and Skills are ready, the plugin performs that verification automatically. The user does not send a prompt, and the installation Agent does not call verify again. Do not force-kill processes or write a background restart script.
+If the command succeeds and returns `OPENAGENT_ONBOARDING_PREPARED` with `status="pending"`, report only: “Installation files are ready and automatic verification is prepared. Complete the authorization page if one opened, and keep this installation conversation in the only visible window. The plugin will open a new conversation when ready.” **Immediately end the current turn. Do not wait for completed in this turn or call `openagent_install_verify`.** The original conversation must become idle before the plugin can claim the preparation.
 
-For preparation failure, expiry, `OPENAGENT_ONBOARDING_STATE`, or an unknown outcome, preserve the state and report its actual stage. Do not extend the deadline, delete records, change conversations, or send the prompt manually. Once verification has started, use only the single status query described above.
+The preparation expires after 30 minutes. The verification service registers before waiting for sign-in; it keeps the preparation pending and unclaimed while sign-in or MCP is not ready. Once MCP and the five business Skills are available and the original conversation is idle and uniquely visible, the plugin creates and displays a new conversation and sends “OpenAgent installed. Open the new user guide.” once, preserving the original draft. Do not create another conversation, manually resend the fixed prompt, or ask the user to send it again. Preserve any returned existing state or failure; successful preparation is not successful verification.
 
-If verification tools or visible new-conversation capability are missing, retain “new-conversation verification pending.” CLI must not use a background child conversation to impersonate visible Desktop / Web verification. Only when there is explicitly no preparation and verification has never started may the user manually create a conversation in the target client and send the fixed prompt. Verification uses the current model and incurs normal model calls, but does not submit a paid Agent task. Do not claim an animation played when it was not displayed.
+## 4. Read the result; reopen normally with the same preparation if needed
 
-## Update and removal
+Before the first preparation, if the new conversation does not appear automatically, or when the result needs checking, query one read-only entry point once in the **original installation conversation**. Use `openagent_install_status` with `{}` if exposed; otherwise run `--status` below. Preserve the original profile, conversation, and Node path, and follow the shell's actual permission requirements. Do not inspect state files or credentials instead of querying.
 
-An installation Agent with `plugin_manager` performs these operations. First finish tasks using OpenAgent, reread the source, version, and `removable` flag, and inspect local changes. Handle only the official GitHub/Gitee `rel` installations above and back up changes that must be kept. This Git package has no usable native update button; adding the same address again is not evidence of an update.
-
-To remove it, call `plugin_manager`:
-
-```json
-{"action":"remove_bundle","target":"dsh-openagent"}
-```
-
-Reread the actual package and runtime state, and report success only after removal is confirmed. `restart-required` means runtime state still needs checking after a normal reopen; do not repeat removal. For an update, return to step 2 only after removal is confirmed, then enable and verify again. Do not repeat authorization when the same endpoint already has valid sign-in. Stop on failure, cancellation, or an unknown outcome without replaying the procedure.
-
-If `stop-profile` is returned, the user must finish tasks and quit the target client normally before the original profile is handled from an independent external terminal. Keep the original `DSH_HOME`. Desktop uses its bundled dsh, not a separate npm installation. Do not run quit or uninstall scripts from the conversation that will be closed. After confirming that the profile has stopped, run:
+Bash:
 
 ```bash
-dsh plugin --profile <original profile> remove dsh-openagent
+"<absolute Node path>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/post-install.mjs" --status --profile "$DSH_PROFILE"
 ```
 
-Only after removal is confirmed, reinstallation is needed, and the profile remains stopped, use `dsh plugin --profile <original profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'`. Before starting the client, use the verified absolute Node path to run `runtime/login.mjs` in that actual profile's package directory, following the single-attempt sign-in rules in step 3; do not assume host-injected variables exist in an external terminal. Continue verification after reopening. The native Plugins page also supports install, enable, and remove operations as a manual maintenance entry; it does not replace execution by an installation Agent that has the tools.
+PowerShell:
 
-The one-line uninstaller for an independent external terminal is in the [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD) and requires curl and Python 3.9+. It requires a stopped target profile, accepts only the official sources above, and preserves other plugins and configuration. Append options after `python3 -`:
+```powershell
+& '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --status --profile $env:DSH_PROFILE
+```
 
-| Option | Purpose |
+Status queries returning `pending` or `NO_ATTEMPT` also include `connection_status`: `not_started` means this version has no Host connection attempt; `connecting` means the same sign-in or MCP initialization is still in progress; `ready` means that same sign-in process succeeded and MCP initialization succeeded, not that business verification passed. Stop for `failed` or `unconfirmed` without reopening to retry OAuth. Treat a missing or invalid field as unknown. A cold start may require completing browser authorization before the host becomes ready.
+
+Handle the receipt following `OPENAGENT_ONBOARDING_STATE`, or the tool's returned state, as follows:
+
+| State | Action |
 | --- | --- |
-| `--yes` / `--dry-run` | Execute the verified removal / preview without removing anything. |
-| `--profile <name>` | Select the original profile; required when several official installations exist. |
-| `--dsh-home <path>` | Select the original Harness home; otherwise use non-empty `DSH_HOME`, then `~/.dsh`. |
-| `--desktop-app <path>` | Select a macOS `.app` or Windows application installation root to locate bundled dsh. |
+| `pending`, unclaimed and unexpired, with `connection_status=not_started` or `ready` | Preserve the same preparation and end the query turn. Prefer online loading. If the conversation still does not appear and reopening is necessary, finish other tasks, quit and reopen Harness normally, and return to the same installation conversation within the original 30-minute expiry. Keep it uniquely visible and idle for automatic continuation. No reinstall, new preparation, or prompt is needed. |
+| `pending` with `connection_status=connecting` | End the query turn and wait for the same connection attempt. Do not reopen, sign in separately, or resend the prompt. |
+| `completed` with all four evidence fields strictly `true` | Report “OpenAgent installation and account verification passed. Continue in the new conversation.” |
+| `NO_ATTEMPT` during the first precheck | Create the first preparation only when every condition in step 3 holds. Stop if there was a previous attempt. |
+| Claimed, `unconfirmed`, `failed`, expired, or a `failed` / `unconfirmed`, missing, or invalid connection state | Report “OpenAgent installation verification is incomplete,” the actual stage, and public error. Preserve state without reopening to retry, resending, extending expiry, or changing conversations to bypass the record. |
 
-The script stops if it cannot verify runtime state or finds a package-manager lock; it does not terminate processes or clear locks. macOS checks standard application locations and Windows uses the registered bundled dsh by default; use `--desktop-app` when the target cannot be uniquely located. The script does not support Linux Desktop; use native management tools or the Plugins page there.
+The four evidence fields are `guide_loaded`, `guide_success`, `account_success`, and `turn_completed`, all strictly `true`: the new conversation loads the guide Skill, the guide returns `view=onboarding/status=ready`, one account call returns strict `success=true`, and that turn completes normally. Verification lasts at most 600 seconds and never beyond the preparation's remaining lifetime. A tool catalog, successful OAuth, a reopened process, or model prose cannot replace that evidence.
 
-Preserve shared `DSH_HOME/openagent-auth`; local removal does not revoke server-side authorization. Fully signing out requires all profiles using that directory to be stopped and explicit user authorization. Never delete the entire Harness home or another client's credentials.
+The official Desktop maintenance instructions recommend quitting before maintenance. This guide's online path applies only to first installation of this plugin and is verified through actual loading and the result above; it does not assume that every plugin can hot-load. Do not terminate processes forcibly, write background restart scripts, call private Host RPCs, or rerun OAuth to troubleshoot verification. If CLI has no visible new-conversation capability, leave verification pending rather than using a background child conversation to impersonate Desktop / Web verification. The process uses the current model and incurs normal model calls, but does not submit a paid Agent task. Do not claim an animation played when it was not displayed.
+
+## Updates and removal
+
+First-time online installation does not authorize online updates, removal, or connection recovery. Finish tasks using OpenAgent, check the official source, version, and local changes, and back up anything that must be retained. Stop when the source or state is uncertain; adding the same package again is not an update procedure.
+
+If the current conversation actually exposes `plugin_manager`, host approval and the verified `removable` state may be used for `{"action":"remove_bundle","target":"dsh-openagent"}`, followed by rereading package and runtime state. Follow an actual `stop-profile` or `restart-required` receipt with a normal exit or reopen and state check; do not remove again. This is an optional maintenance entry point, not an installation prerequisite.
+
+Perform other maintenance from a separate external terminal after confirming that the target profile is stopped. Preserve its original `DSH_HOME` and profile, using the application's built-in dsh for Desktop. Run `"<absolute dsh path>" plugin --profile "<original profile>" remove dsh-openagent`; only reinstall for an authorized update after removal is confirmed. Do not run exit or uninstall scripts from the conversation that will be closed, and do not clear package-manager locks. Do not repeat authorization when valid sign-in already exists. Stop on failure, cancellation, or an unknown outcome.
+
+The one-line uninstaller is in the [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD). It requires curl and Python 3.9+ and runs only from an external Bash terminal after the profile is stopped. Append arguments after `python3 -`:
+
+| Argument | Purpose |
+| --- | --- |
+| `--yes` / `--dry-run` | Execute the verified removal / read-only preview. |
+| `--profile <name>` | Select the original profile; required if multiple official installations exist. |
+| `--dsh-home <path>` | Select the original Harness home; defaults to nonempty `DSH_HOME` or otherwise `~/.dsh`. |
+| `--desktop-app <path>` | Select a macOS `.app` or Windows installation root to locate built-in dsh. |
+
+The script stops when runtime state cannot be verified or a package-manager lock exists. It does not terminate processes or clear locks. It checks standard application directories on macOS and registered built-in dsh on Windows; use `--desktop-app` if the location is ambiguous. For Linux Desktop, use the native plugin page; the uninstaller does not support that case. Preserve other plugins, configuration, and shared `DSH_HOME/openagent-auth`. Local removal does not revoke server-side authorization; never delete the entire home or another client's credentials.
