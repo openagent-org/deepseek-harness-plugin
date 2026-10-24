@@ -70,10 +70,10 @@ Input is an explicit query with constraints, a general browsing intent, or a hea
 Input is the browser result from Agent Search or a trusted `more_requested` result from Agent Selection. This stage opens the page; it does not search or wait for selection.
 
 1. For an initial browser result, require `presentation_mode=browser`, `browser_handoff=true`, `status=pending`, non-empty `selection_id` and `handoff_url`, and no Search Agents Widget binding. For `more_requested`, require the same trusted selection session and a new non-empty `handoff_url` from its wait result. Reject invalid handoffs before opening a page.
-2. Use only the exact `handoff_url` and trusted `selection_id` from that Tool Result. `/browser/handoff` 入口用于建立浏览器访问权限并跳转到选择页，同时兼容已有的 `/openagent/agents` 路径。不得将交接入口改写为其跳转目标。 Use the original absolute HTTPS URL only as a navigation argument or the target of this flow's “打开 OpenAgent 选择页”/“Open OpenAgent selection page” link. Do not compose, rewrite, separately output, log, or reuse the full URL or its short-lived token.
-3. 发出 Browser Handoff 阶段更新。确认当前工具目录存在 `openagent_browser_open` 后，以原始 `selection_id` 和原始 `handoff_url` 调用一次。只有结果为 `status=opened` 且 `tab_handle` 非空，才保留该可信自有句柄；这只确认当前可见会话的右侧标签已提交，不代表网页加载、用户选择或 MCP 业务成功。工具缺失时提供本流程的本地化选择页链接。不得猜测其他宿主工具、打开隐藏自动化浏览器或自行构造预览。
-4. 开页返回 `failed`、`unconfirmed`，或调用超时/失败时，若存在 `openagent_browser_status`，只以原始 `selection_id` 查询一次安全回执；该工具不接收 URL，不导航、不读取页面正文。仅在其返回 `opened` 和可信 `tab_handle` 时复用标签；否则提供原始选择页链接，不再次调用 open、不重跑搜索。不论标签已确认或只交付链接，都立即进入 Agent Selection，不额外检查网页。
-5. 对 `more_requested`，新页面已确认打开或已交付链接后，使用 `openagent_browser_close(tab_handle)` 尝试关闭本流程被替换的旧标签一次，不关闭新标签。只传先前 open/status 返回的句柄；缺少工具或句柄时保留关闭未确认状态。将仍属于当前流程的可信句柄带到终态清理。
+2. Use only the exact `handoff_url` and trusted `selection_id` from that Tool Result. The `/browser/handoff` entry point establishes browser access and redirects to the selection page; the existing `/openagent/agents` path remains supported. Do not rewrite the handoff entry point to its redirect target. Use the original absolute HTTPS URL only as a navigation argument or the target of this flow's “打开 OpenAgent 选择页”/“Open OpenAgent selection page” link. Do not compose, rewrite, separately output, log, or reuse the full URL or its short-lived token.
+3. Emit the Browser Handoff stage update. After confirming that `openagent_browser_open` is in the current tool catalog, call it once with the original `selection_id` and `handoff_url`. Retain its trusted owned handle only when the result has `status=opened` and a non-empty `tab_handle`; this confirms only that the right-side tab was submitted in the current visible session, not page loading, user selection, or MCP business success. If the tool is unavailable, provide this flow's localized selection-page link. Do not guess other host tools, open a hidden automation browser, or construct a preview yourself.
+4. If opening returns `failed` or `unconfirmed`, or the call times out or fails, query the safe receipt once using only the original `selection_id` if `openagent_browser_status` is available; this tool accepts no URL, performs no navigation, and reads no page body. Reuse the tab only when it returns `opened` and a trusted `tab_handle`; otherwise, provide the original selection-page link without calling open again or repeating the search. Immediately enter Agent Selection whether the tab was confirmed or only a link was delivered, without additional page checks.
+5. For `more_requested`, after the new page is confirmed open or its link is delivered, use `openagent_browser_close(tab_handle)` once to attempt to close this flow's replaced old tab, leaving the new tab open. Pass only the handle previously returned by open/status; if the tool or handle is missing, leave closure unconfirmed. Carry trusted handles still owned by this flow into terminal cleanup.
 
 **Output:** The same trusted selection session and the opened, recovered, or linked handoff page, or an invalid handoff.
 
@@ -139,10 +139,10 @@ For cancellation replies, set `display_locale` to `zh-CN` or `en-US`: explicit u
 
 ### Browser Display Boundary
 
-- 选择页只通过当前目录中的 `openagent_browser_open(selection_id, handoff_url)` 打开，完整 URL 仅作这次导航参数或本流程选择页链接的目标。成功必须有提交回执及自有 `tab_handle`；缺少工具、可见客户端、browser 模块，或存在多个同会话可见窗口时，使用原始链接，不自动重试。
-- 开页、一次 status 恢复或交付链接后，立即开始同一选择的 `openagent_wait_for_selection`；网页可继续异步加载。不得额外列举或读取浏览器标签、重复打开、重跑业务工具或发起第二个 wait。
-- 收到 `selected`、`cancelled` 或 `timed_out` 后，仅对本流程可信句柄调用 `openagent_browser_close(tab_handle)` 一次。没有句柄或关闭工具则跳过。保留用户原有标签和 Agent 结果页。
-- 只有 close 返回 `status=closed` 才确认关闭；`failed`、`unconfirmed`、超时或缺回执均不能声称已关闭。不得读取页面正文、另做关闭后检查、切换浏览器接口或重新打开。
+- Open the selection page only through `openagent_browser_open(selection_id, handoff_url)` in the current tool catalog. Use the full URL only as this navigation argument or the target of this flow's selection-page link. Success requires a submission receipt and an owned `tab_handle`; if the tool, visible client, or browser module is missing, or multiple visible windows belong to the same session, use the original link without automatically retrying.
+- After opening, one status recovery, or link delivery, immediately start `openagent_wait_for_selection` for the same selection; the page may continue loading asynchronously. Do not additionally list or read browser tabs, open the page again, rerun business tools, or start a second wait.
+- After `selected`, `cancelled`, or `timed_out`, call `openagent_browser_close(tab_handle)` only once for this flow's trusted handle. Skip this if the handle or close tool is unavailable. Preserve the user's existing tabs and Agent result pages.
+- Confirm closure only when close returns `status=closed`; `failed`, `unconfirmed`, a timeout, or a missing receipt does not permit claiming that the page closed. Do not read the page body, perform another check after closing, switch browser interfaces, or reopen the page.
 
 ### Wait and Close Orchestration
 
