@@ -316,7 +316,7 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     const current = this.sources.get(id)
     if (current) return current.persisted ? current.result : receipt(current.record, 'unconfirmed', 'ONBOARDING_ALREADY_CLAIMED')
     try {
-      const result = await this.store.read(id) ?? await this.store.pendingStatus(id)
+      const result = await this.store.pendingStatus(id)
       if (result) return result
       const connection = await this.connectionDetails()
       return { status: 'failed', code: 'NO_ATTEMPT', connection_status: connection.status, connection }
@@ -328,7 +328,7 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     if (this.resuming.has(agent.id) || !this.pendingClient(agent)) return
     this.resuming.add(agent.id)
     try {
-      const entry = (await this.store.pending()).find(item => item.sourceSessionId === agent.id && item.expiresAt > Date.now())
+      const entry = await this.store.pending(agent.id)
       if (entry && this.pendingClient(agent)) {
         await this.start({ locale: entry.record.locale }, { agent, signal: this.lifetime.signal }, entry.record, entry.expiresAt)
       }

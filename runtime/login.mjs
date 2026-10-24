@@ -60,8 +60,8 @@ async function main() {
   process.env.MCP_REMOTE_CONFIG_DIR = prepareAuthDirectory()
   // 此文件仅作为独立进程执行时修改 umask，不能改变 Harness Host 的权限策略。
   process.umask(0o077)
-  const entry = createRequire(import.meta.url).resolve(`mcp-remote/dist/${proxy ? 'proxy' : 'client'}.js`)
-  process.argv = [process.execPath, entry, ...bridgeArguments()]
+  const entry = proxy ? undefined : createRequire(import.meta.url).resolve('mcp-remote/dist/client.js')
+  if (!proxy) process.argv = [process.execPath, entry, ...bridgeArguments()]
   let connected = false
   let timedOut = false
   let stage = 'login'

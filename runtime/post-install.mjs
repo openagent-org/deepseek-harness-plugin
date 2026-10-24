@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 安装预约只保存一次发送所需的标识；不重启应用，不读取认证或会话正文。
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises'
+import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -90,6 +90,11 @@ export function createOnboardingStore({ profileDir, version }) {
     const value = await readJson(join(root, `${hash(source)}.json`))
     return value === null ? null : validate(value, source)
   }
+  const loadPending = async source => {
+    if (!await folder()) return null
+    const value = await readJson(join(root, `${hash(source)}.pending.json`))
+    return value === null ? null : validate(value, source, true)
+  }
   const receipt = async (source, state) => {
     const value = await readJson(join(root, `${hash(source)}.result.json`))
     if (value === null) return null
@@ -166,6 +171,13 @@ export function createOnboardingStore({ profileDir, version }) {
       await folder(true)
       const existing = await store.read(source)
       if (existing) return { reserved: false, result: existing }
+      const pending = await loadPending(source)
+      if (pending && (pending.expiresAt <= Date.now()
+        || ['requestId', 'targetSessionId', 'promptId', 'locale'].some(key => record[key] !== pending.record[key]))) {
+        const result = await store.pendingStatus(source)
+        if (!result) fail()
+        return { reserved: false, result }
+      }
       if (canReserve && !canReserve()) return { reserved: false, deferred: true }
       const value = { schema: 1, version, sourceSessionId: source, record }
       try { await writeExclusive(join(root, `${hash(source)}.json`), value); return { reserved: true } }
@@ -204,10 +216,8 @@ export function createOnboardingStore({ profileDir, version }) {
       id(source)
       const existing = await store.read(source)
       if (existing) return existing
-      if (!await folder()) return null
-      const value = await readJson(join(root, `${hash(source)}.pending.json`))
+      const value = await loadPending(source)
       if (value === null) return null
-      validate(value, source, true)
       // 读取预约期间可能已被 Host 领取；领取结果始终优先，不能报成未发送。
       const after = await store.read(source)
       if (after) return after
@@ -220,18 +230,11 @@ export function createOnboardingStore({ profileDir, version }) {
         ? { status: 'pending', ...ids, expires_at: value.expiresAt, connection_status: connection.status, connection }
         : { status: 'unconfirmed', ...ids, code: 'ONBOARDING_REQUEST_EXPIRED' }
     },
-    async pending() {
-      if (!await folder()) return []
-      const requests = []
-      for (const name of (await readdir(root)).filter(name => name.endsWith('.pending.json')).sort()) {
-        const value = await readJson(join(root, name))
-        if (!value || name !== `${hash(value.sourceSessionId)}.pending.json`) fail()
-        validate(value, value.sourceSessionId, true)
-        if (!await load(value.sourceSessionId) && value.expiresAt > Date.now()) {
-          requests.push({ sourceSessionId: value.sourceSessionId, record: value.record, expiresAt: value.expiresAt })
-        }
-      }
-      return requests
+    async pending(source) {
+      id(source)
+      const value = await loadPending(source)
+      if (!value || await store.read(source) || value.expiresAt <= Date.now()) return null
+      return { sourceSessionId: source, record: value.record, expiresAt: value.expiresAt }
     },
   }
   return store
@@ -251,11 +254,10 @@ export async function prepareOnboarding({ profileDir, version, sourceSessionId, 
   const path = join(root, `${hash(sourceSessionId)}.pending.json`)
   const value = { schema: 1, version, sourceSessionId, record, expiresAt: Date.now() + 30 * 60 * 1000 }
   try { await writeExclusive(path, value) } catch (error) { if (error.code !== 'EEXIST') throw error }
-  // pending() 验证已有预约格式；不刷新期限、不替换任何已有预约。
-  const requests = await store.pending()
+  // 只验证本来源预约；不刷新期限、不替换任何已有预约。
+  const pending = await store.pending(sourceSessionId)
   const after = await store.read(sourceSessionId)
   if (after) return after
-  const pending = requests.find(item => item.sourceSessionId === sourceSessionId)
   if (!pending) return { status: 'unconfirmed', code: 'ONBOARDING_REQUEST_EXPIRED' }
   return store.pendingStatus(sourceSessionId)
 }

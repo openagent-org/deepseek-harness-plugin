@@ -323,7 +323,6 @@ export async function runProxy(runtime, args, status) {
     await local.start()
   } catch (error) {
     authServer?.close()
-    status(`OPENAGENT_CONNECTION_DIAGNOSTIC ${JSON.stringify(connectionFailure(error, 'mcp'))}`)
     throw Object.assign(new Error('OpenAgent MCP 连接未完成。', { cause: error }), { code: 'OPENAGENT_MCP_CONNECT_FAILED' })
   }
 }

@@ -13,7 +13,7 @@
 - 安装或连接失败：“安装失败：{原因}。{解决方案}”。填入已确认的简短原因和当前可执行的处理，不输出占位符，不猜测失败阶段。
 - 明确的授权超时：“登录超时，OpenAgent 安装尚未完成。请查看安装失败卡片中的阶段和原因。”
 
-原生验收等待期间保持当前轮；真正完成后的最终回复按第 4 步。仅经用户接受的 CLI 后备预约使用第 3 步的等待文案并先结束原轮。授权页打开、登录成功和连接就绪均不能使用安装验收完成文案。
+原生验收等待期间保持当前轮；真正完成后的最终回复按第 4 步。
 
 ## 1. 核对当前宿主和执行工具
 
@@ -21,9 +21,9 @@
 
 通过 shell 只核对宿主注入的 `DSH_HOME`、`DSH_PROFILE`、`DSH_PROFILE_DIR` 和 `DSH_SESSION_ID`，保留原值。确认 profile 目录确属该主目录、当前客户端和原安装会话；缺失或不符时停止，不猜测其他 profile，不读取凭据或会话正文。
 
-核对 Git、Node 与 dsh 的版本和来源。Node 需要 `22.19+`（22 系列）或 `24+`；可使用 `load_workspace_dependencies` 返回的 Node 绝对路径。Desktop 必须定位**当前运行应用**内置的 `resources/runtime/cli/bin/dsh`（Windows 为 `dsh.cmd`），macOS 位于应用的 `Contents/Resources/runtime/cli/bin/dsh`；不要按固定应用名猜路径，也不要另装 npm dsh。非 Desktop 使用与当前 Host 属于同一安装的 dsh。用其绝对路径核对 `--version`，后续替换示例中的占位路径并正确引用。
+核对 Git、Node 与 dsh 的版本和来源。Node 需要 `22.19+`（22 系列）或 `24+`，核对当前宿主可用的 Node 绝对路径。Desktop 必须定位**当前运行应用**内置的 `resources/runtime/cli/bin/dsh`（Windows 为 `dsh.cmd`），macOS 位于应用的 `Contents/Resources/runtime/cli/bin/dsh`；不要按固定应用名猜路径，也不要另装 npm dsh。非 Desktop 使用与当前 Host 属于同一安装的 dsh。用其绝对路径核对 `--version`，后续替换示例中的占位路径并正确引用。
 
-只读检查当前 profile 的 `package.json` 中该包的依赖来源、`dsh.profile.bundles`、相关禁用记录和实际安装包的名称、版本；不要输出整份配置。认可来源仅为以下官方 GitHub/Gitee 仓库的 `rel`（包括包管理器保存的等价写法）。已有可信安装时保留，不再次 add；已禁用、旧版缺少本指南的状态入口、未知同名来源、文件异常或未确认的本地修改时停止，按维护流程处理，不擅自启用或覆盖。
+只读检查当前 profile 的 `package.json` 中该包的依赖来源、`dsh.profile.bundles`、相关禁用记录和实际安装包的名称、版本；不要输出整份配置。认可来源仅为以下官方 GitHub/Gitee 仓库的 `rel`（包括包管理器保存的等价写法）。已有可信且版本不低于 `0.1.15` 的安装时保留，不再次 add；低于该版本不具备本流程的内置预约检查，应报告版本不适用并停止。已禁用、未知同名来源、文件异常或未确认的本地修改时停止，不擅自启用或覆盖。
 
 ## 2. 用当前宿主 CLI 安装一次
 
@@ -67,53 +67,21 @@ CLI 会将新 bundle 加入启用列表，宿主优先在线加载。每次加�
 
 ## 3. 在原安装轮直接等待验收
 
-先在原安装会话按第 4 步的只读入口查询一次状态。仅当本次从未调用 `--prepare` 或 `openagent_install_verify`、没有已知验收对话，且查询返回 `NO_ATTEMPT`、`connection_status` 为 `not_started`、`connecting` 或 `ready` 时，发起首次验收。已有预约或尝试时沿用原状态；已发起过尝试却返回 `NO_ATTEMPT`，或连接为 `failed` / `unconfirmed`、字段缺失或值非法时均停止，不新建尝试、续期或补发。
-
-在当前原生工具目录中确认 `openagent_install_verify` 后，先提示“正在连接 OpenAgent，连接就绪后将自动打开新用户引导…”，再**直接调用该原生工具一次**：
+安装文件核对完成后，在当前原生工具目录中确认 `openagent_install_verify`，提示“正在连接 OpenAgent，连接就绪后将自动打开新用户引导…”，再直接调用一次：
 
 ```json
 {"locale":"zh-CN"}
 ```
 
-不要通过 `run_code` / PTC 嵌套调用，不另行执行 `--prepare`，不传自造的 wait、profile、会话或请求参数。**保持原安装轮运行，等待同一次工具调用返回，不提前输出最终回复，也不要求原会话先空闲。** 工具先持久占用一次验收记录，再等待同一连接真实就绪；连接等待、创建新对话、发送引导和四项验收共用最多 600 秒。失败、取消、超时或未知结果均停止并保留记录，不重试、不另建预约、不重新登录；必要时只读查询原状态。
+工具自行检查原会话的既有预约或验收记录，无需先调用状态查询。已有记录时返回原状态；首次调用保存一次性记录，等待同一连接就绪。**保持原安装轮运行，等待同一次工具调用返回，不提前输出最终回复。** 连接等待、创建新对话、发送引导和四项验收共用最多 600 秒。失败、取消、超时或未知结果时保留记录并停止，不重新登录、另建预约或补发提示；需要诊断时按第 4 步查询。
 
-热加载可能尚未把原生工具暴露到当前目录。此时保持本轮等待当前连接，并在后续原生工具步骤核对刷新后的目录；不要把工具暂未出现当作失败后重新安装，也不要调用私有 RPC、模拟工具或提前宣称预约完成。若当前宿主无法继续等待，则如实报告尚未完成；不得自动切到下方会提前结束原轮的后备路线。
+热加载尚未把工具暴露到当前目录时，在后续原生工具步骤核对刷新后的目录。若宿主无法继续等待，如实报告尚未完成，不重新安装或改用 CLI 预约结束原轮。
 
-连接状态为 `ready`、MCP 与五项业务 Skills 实际可用且原会话唯一可见时，插件自动创建并显示新对话，发送一次“OpenAgent 已安装，打开新用户引导”，保留原会话草稿。新引导任务继承原安装任务所属工作区；原任务未归入任何工作区时才沿用原工作目录。不要另外建对话、手动补发固定提示或要求用户再发一遍。只有工具正常返回 `completed` 且四项证据均严格为 `true` 后，才按第 4 步核对实际版本并输出完成文案。
-
-### 仅在用户接受时使用 CLI 后备路线
-
-仅当原生验收工具确实不可用、用户明确接受先结束原安装轮，且仍满足上述首次状态预检条件时，才执行一次 `--prepare`；原生验收已经调用、等待中或结果未知时不得切换。使用第 1 步核对的 Node 与宿主变量，通过原生 shell 请求本次 `sandbox_permissions: "danger-full-access"`，`justification` 说明“为原安装会话保存一次新对话验收预约”。等待短命令结束，不关闭应用。
-
-Bash：
-
-```bash
-: "${DSH_HOME:?未取得当前 Harness 主目录}" "${DSH_PROFILE:?未取得当前 profile}" "${DSH_PROFILE_DIR:?未取得当前 profile 路径}" "${DSH_SESSION_ID:?未取得当前会话标识}"
-"<Node 绝对路径>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale zh-CN
-```
-
-PowerShell：
-
-```powershell
-if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw '未取得当前 Harness profile 或会话标识' }
-& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
-```
-
-命令成功且输出 `OPENAGENT_ONBOARDING_PREPARED`、`status="pending"` 时，用已回读的实际版本替换占位符，最终自然语言回复严格为以下两段，不追加链接、日志、ID 或安装成功文案：
-
-```text
-OpenAgent {版本号} 安装文件已就绪，自动验收已预约。
-
-请保持本安装会话在唯一可见窗口；如已打开授权页，请在网页完成授权。连接就绪后会自动打开新用户引导。
-```
-
-**仅此后备路线随即结束当前轮，不在本轮等待 completed，也不调用 `openagent_install_verify`。** 后备预约须等原会话空闲后才可领取。
-
-后备预约有效期 30 分钟。验收服务在等待登录前注册；连接仍在进行时保留 pending，不提前领取。连接就绪、真实 MCP 与 Skills 可用，且原会话空闲并唯一可见后，才按上述规则创建新对话并发送一次引导；连接失败或未知按第 4 步停止并显示诊断。输出已有状态或发生失败时保留该状态，不能把预约成功当作验收成功。
+连接就绪、MCP 与五项业务 Skills 实际可用且原会话唯一可见后，插件自动打开同一工作区的新对话，发送一次“OpenAgent 已安装，打开新用户引导”，保留原会话草稿；原任务未归入工作区时沿用原工作目录。工具返回后按第 4 步处理结果。
 
 ## 4. 读取诊断与完成结果
 
-首次验收前、原调用已经返回但需要核对结果，或 CLI 后备新对话未自动出现时，在**原安装会话**选择一个只读入口查询一次：已暴露 `openagent_install_status` 时传 `{}`；否则运行下列 `--status`。保留原 profile、会话和 Node 路径，按 shell 实际权限要求执行，不读取状态文件或凭据代替查询。原生验收工具仍在等待时，继续等待同一次调用，不并行查询或把“等待中”当作失败终态。
+原调用已返回但结果需要核对，或既有预约未自动打开新对话时，在**原安装会话**查询只读状态：已暴露 `openagent_install_status` 时传 `{}`；否则运行下列 `--status`。保留原 profile、会话和 Node 路径，按 shell 实际权限要求执行。原生验收仍在等待时，继续等待同一次调用。
 
 Bash：
 
@@ -127,32 +95,22 @@ PowerShell：
 & '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --status --profile $env:DSH_PROFILE
 ```
 
-状态查询保留 `connection_status`，并通过 `connection` 返回当前连接的安全诊断：必填 `status`，以及有可信记录时的可选 `stage/code/http_status/started_at/updated_at`。两个时间为连接开始和最近更新的 Unix 毫秒；尚无尝试时仅有 `{status:"not_started"}`，不虚构阶段或时间。`not_started` 表示该版本尚无 Host 连接尝试；`connecting` 表示同一尝试仍在进行；`ready` 表示同一登录子进程成功且 MCP 初始化成功，仍不代表业务验收。`failed` 或 `unconfirmed` 必须停止，不能借重开重试 OAuth；字段非法或状态无法确认按未知处理。冷启动可能需要完成网页授权后宿主才就绪。
+查询通过 `connection` 返回安全诊断：`status` 表示连接状态，`stage/code/http_status` 在有可信记录时说明阶段、公开原因和 HTTP 状态。只转述回执中的已确认信息，不输出凭据、授权 URL、原始日志或业务正文。
 
-| `connection.stage` | 实际阶段 |
-| --- | --- |
-| `preparing` | 准备连接，检查运行依赖和专用认证目录。 |
-| `login` | 执行同一次登录连接检查，必要时进入授权。 |
-| `waiting_authorization` | 已确认授权页自动打开，等待本次网页授权。 |
-| `mcp` | 登录进程已成功，正在加载 MCP；是否就绪以 `connection.status` 为准。 |
-
-公开原因仅使用白名单：`AUTH_TIMEOUT` / `AUTH_REJECTED` 表示授权超时或拒绝，`NETWORK_TIMEOUT` / `NETWORK_ERROR` 表示网络超时或错误，`HTTP_ERROR` 可附带实际 HTTP 状态，`PROTOCOL_ERROR` 表示协议错误，`DEPENDENCY_ERROR` 表示运行依赖异常，`LOGIN_FAILED` 表示未能进一步归类的登录失败，`MCP_STARTUP_FAILED` 表示 MCP 初始化失败，`STATE_UNAVAILABLE` 表示状态不可用，`CONNECTION_STOPPED` 表示连接尝试中断。不要根据笼统失败推断某个网络、授权或 MCP 原因，不输出 Token、授权 URL、回调参数、原始 stderr 或业务正文。
-
-连接失败返回 `status=failed/code=CONNECTION_FAILED`，无法确认则返回 `status=unconfirmed/code=CONNECTION_UNCONFIRMED`，并附上述连接诊断。原生验收沿用已占用记录保存一次失败；CLI 后备预约由 Host 领取后保存。之后连接恢复或 Host 重载也不重放该次尝试；插件在可信源安装轮下显示“OpenAgent 连接失败”或“OpenAgent 连接结果未确认”卡片，列出固定阶段、公开原因及适用的 HTTP 状态，说明本次验收已停止且未自动重试。卡片无重试按钮，不触发 OAuth 或模型调用；无需让用户持续查询。无法确定可信安装轮次时不承诺卡片出现，使用只读入口核对。
-
-`OPENAGENT_ONBOARDING_STATE` 后的回执或工具返回状态按下表处理：
+按工具回执处理：
 
 | 状态 | 处理 |
 | --- | --- |
-| CLI 后备 `pending`，未领取、未过期，且 `connection_status=not_started` 或 `ready` | 保留同一预约并结束查询轮。在线加载优先；仍未自动打开且确需重开时，待其他任务结束后正常退出并重开 Harness，在预约的原有 30 分钟期限内回到同一安装会话，保持唯一可见和空闲，插件自动继续。无需重装、重新预约或发送提示。 |
-| CLI 后备 `pending` 且 `connection_status=connecting` | 结束查询轮，等待同一连接尝试；不重开、不另行登录、不补发提示。 |
-| `completed` 且四项证据均为 `true` | 再次回读实际安装版本，按下方完成规则报告；不能只凭模型正文或卡片外观认定通过。 |
-| 首次预检返回 `NO_ATTEMPT` | 仅满足第 3 步全部条件时直接调用首次原生验收；CLI 后备另须满足其使用条件。有过尝试后返回此值必须停止。 |
-| 已领取、`unconfirmed`、`failed`、过期，或连接状态为 `failed` / `unconfirmed`、缺失、非法 | 使用固定失败文案，填入实际阶段、公开原因和可执行处理；保留状态，不重开重试、不补发、不续期、不换会话绕过记录。 |
+| `completed` 且四项证据均为 `true` | 回读实际安装版本，按下方规则报告完成。 |
+| 既有 `pending`，未领取、未过期，连接为 `not_started/connecting/ready` | 保留原预约和期限，不改用新的验收请求；原会话空闲且唯一可见、连接就绪后由插件继续。 |
+| `NO_ATTEMPT` | 仅确实从未发起验收时进入第 3 步；有过尝试则停止。 |
+| `failed`、`unconfirmed`、过期或无法确认 | 使用固定失败文案说明实际阶段、公开原因和可执行处理，保留状态并停止。 |
 
-四项证据为 `guide_loaded`、`guide_success`、`account_success`、`turn_completed`，必须严格为 `true`：新对话实际加载引导 Skill，引导返回 `view=onboarding/status=ready`，一次账号调用返回严格的 `success=true`，并正常结束该轮。原生验收最多使用 600 秒，包含连接等待和四项验收；CLI 后备验收还不得超过预约剩余期限。工具目录、OAuth 成功、进程重开或模型正文都不能替代该结果。
+连接失败或未知时，插件在可信的原安装轮下保存失败卡片，展示上述安全诊断，无需持续查询。无可信安装轮次时以只读回执为准。
 
-需要报告完成结果时，先取得上述 completed 回执，再次只读回读实际安装包版本并确认与安装时一致。若原安装轮的真实完成卡片可见，最终自然语言回复必须严格为以下两段，用实际版本替换占位符，不追加链接、技术说明、工具加载原因、任务 ID 或其他文字，也不输出 Codex 的 `::created-thread` 指令：
+四项证据为 `guide_loaded`、`guide_success`、`account_success`、`turn_completed`，必须严格为 `true`：新对话实际加载引导 Skill，引导返回 `view=onboarding/status=ready`，一次账号调用返回 `success=true`，并正常结束该轮。模型正文、登录成功或卡片外观不能替代该结果。
+
+需要报告完成结果时，先取得上述 completed 回执，再次只读回读实际安装包版本并确认与安装时一致。若原安装轮的真实完成卡片可见，最终自然语言回复必须严格为以下两段，用实际版本替换占位符，不追加链接、技术说明、工具加载原因、任务 ID 或其他文字：
 
 ```text
 OpenAgent {版本号} 已安装完成，新用户引导和账号验证已通过。
@@ -160,35 +118,6 @@ OpenAgent {版本号} 已安装完成，新用户引导和账号验证已通过�
 点击下方「打开新用户引导」继续。
 ```
 
-若卡片不可见或没有可信安装轮次，第二段改为“请在已打开的新用户引导对话中继续。”，不得虚构按钮。未取得完整验收证据或版本不一致时，不使用完成文案，按实际阶段和公开原因报告未完成。采用 CLI 后备路线时，已发送的 pending 回复不会被改写为成功回复。
+若卡片不可见或没有可信安装轮次，第二段改为“请在已打开的新用户引导对话中继续。”，不得虚构按钮。未取得完整验收证据或版本不一致时，不使用完成文案，按实际阶段和公开原因报告未完成。
 
 成功结果保存后，插件在原安装任务对应安装轮的最终回复下方显示独立完成卡片“OpenAgent 安装及账号验证通过”，按钮为“打开新用户引导”。页面不会自动切回原任务；用户返回原任务（包括正常重开后返回）即可查看已保存的卡片。点击按钮只打开已存在的引导任务，不创建任务、不重发提示、不调用模型。无法确定可信安装轮次时不显示卡片，实际验收结果仍以上述只读查询为准。验收状态不跨包版本迁移，既有引导任务保持原样。
-
-官方 Desktop 维护说明建议退出应用后操作；本指南的在线路径仅用于新装本插件，并以真实加载及上述结果验收，不推定所有插件都能热加载。不得强制结束进程、编写后台重启脚本、调用 Host 私有 RPC 或重跑 OAuth 排查验收。CLI 没有可见新对话能力时保留验收待完成，不以后台子会话冒充 Desktop / Web 验收。该过程使用当前模型，会产生正常模型调用，但不提交付费 Agent 任务；不声称未显示的动画已播放。
-
-## 更新与移除
-
-首次在线安装不扩大为在线更新、移除或断线恢复授权。先结束使用 OpenAgent 的任务，核对官方来源、版本和本地修改，备份需要保留的内容。未知来源或状态不明确时停止，不重复 add 充当更新。
-
-当前会话真实提供 `plugin_manager` 时，可在宿主审批下按已核对的 `removable` 状态使用 `{"action":"remove_bundle","target":"dsh-openagent"}`，再回读包和运行状态；`stop-profile` 或 `restart-required` 按实际回执正常退出、重开后核对，不重复移除。该工具是可选维护入口，不是安装前提。
-
-其他维护从独立外部终端进行：确认目标 profile 已停止，保留原 `DSH_HOME` 和 profile，Desktop 使用该应用内置 dsh。执行 `"<dsh 绝对路径>" plugin --profile "<原 profile>" remove dsh-openagent`；确认移除后才能按已授权更新要求重新安装。不要从将被关闭的聊天运行退出或卸载脚本，不清理包管理锁。已有有效登录不重复授权；失败、取消或未知结果停止。
-
-上述两种原生移除仅移除 bundle 并保留登录，适用于维护和更新；清理本地登录使用下面的完整卸载入口。
-
-完整卸载的一行入口见 [README](https://gitee.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+，仅在 profile 停止后从外部 Bash 执行。参数追加在 `python3 -` 后：
-
-| 参数 | 用途 |
-| --- | --- |
-| `--yes` / `--dry-run` | 执行已核对的卸载及适用的认证清理 / 只读列出动作和执行前提，不写文件。 |
-| `--profile <名称>` | 指定原 profile；多个官方安装时必须明确指定。 |
-| `--dsh-home <路径>` | 指定原 Harness 主目录；缺省读取非空 `DSH_HOME`，否则使用 `~/.dsh`。 |
-| `--desktop-app <路径>` | 指定 macOS 的 `.app` 或 Windows 安装根目录，定位内置 dsh。 |
-
-原生移除前须确认目标 profile 已停止且无包管理锁；脚本不终止进程或清理锁。macOS 检查标准应用目录，Windows 使用已注册的内置 dsh；无法唯一定位时使用 `--desktop-app`。Linux Desktop 的 bundle 移除使用原生管理页面，该脚本不支持该移除场景。
-
-原生移除成功并回读确认后，完整卸载脚本检查同一 `DSH_HOME` 下所有 profile。任何来源的 `dsh-openagent` 依赖、bundle 登记或包路径（包括失效链接）均算使用记录；仍有使用记录时保留登录，列出对应 profile，并正常结束。只有确认没有其他使用者、该主目录各 profile 均已停止、没有包管理锁，且专用认证路径及整棵目录树无符号链接、Windows junction 或特殊文件时，才删除整个 `DSH_HOME/openagent-auth`，包含全部缓存版本。删除前再次核对使用记录和路径。
-
-实际执行时，无法核实其他 profile、运行状态或路径，或发现锁、异常文件，将保留认证缓存并以非零退出码报告“清理未完成”；删除期间发生文件系统错误时也以非零退出码报告可能仍有残留，不自动重试。旧版已移除插件而仅剩认证缓存时，可用同一脚本执行 `--yes` 或 `--dry-run`，无需为清理缓存再找到 dsh CLI；认证缓存也不存在时重复运行无操作。
-
-清理不读取凭据正文、不备份 Token，保留其他插件、配置、其他认证目录（包括 `.mcp-auth`）、会话及 `.openagent-onboarding`。本地删除不等于撤销服务端授权，不能删除整个主目录或其他客户端凭据。
