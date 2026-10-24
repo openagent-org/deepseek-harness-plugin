@@ -16,14 +16,14 @@ Read only the relevant dependency source, `dsh.profile.bundles`, disablement rec
 
 ## 2. Install once with the current host's CLI
 
-Run this only when the plugin is not installed. First tell the user: “Installing and connecting OpenAgent. If an authorization page opens, please complete authorization there.”
+Prefer Gitee for the initial download; use GitHub once as a fallback only for the network download failures defined below. Run this only when the plugin is not installed. First tell the user: “Installing and connecting OpenAgent. If an authorization page opens, please complete authorization there.”
 
 For macOS / Linux, call `bash`:
 
 ```json
 {
   "description": "Install OpenAgent in the current Harness profile",
-  "command": ": \"${DSH_HOME:?Missing current Harness home}\" \"${DSH_PROFILE:?Missing current profile}\" \"${DSH_PROFILE_DIR:?Missing current profile directory}\" \"${DSH_SESSION_ID:?Missing current conversation ID}\"; \"<absolute dsh path>\" plugin --profile \"$DSH_PROFILE\" add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'",
+  "command": ": \"${DSH_HOME:?Missing current Harness home}\" \"${DSH_PROFILE:?Missing current profile}\" \"${DSH_PROFILE_DIR:?Missing current profile directory}\" \"${DSH_SESSION_ID:?Missing current conversation ID}\"; \"<absolute dsh path>\" plugin --profile \"$DSH_PROFILE\" add 'git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel'",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "This installation downloads the official plugin and writes to the current Harness profile so the host can load OpenAgent."
@@ -35,7 +35,7 @@ For Windows, call `pwsh`:
 ```json
 {
   "description": "Install OpenAgent in the current Harness profile",
-  "command": "if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw 'Missing current Harness profile or conversation ID' }; & '<absolute dsh.cmd path>' plugin --profile $env:DSH_PROFILE add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'",
+  "command": "if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw 'Missing current Harness profile or conversation ID' }; & '<absolute dsh.cmd path>' plugin --profile $env:DSH_PROFILE add 'git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel'",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "This installation downloads the official plugin and writes to the current Harness profile so the host can load OpenAgent."
@@ -48,7 +48,7 @@ Wait for the same installation task using its actual `jobId`, for at most 60 sec
 {"job_id":"<jobId from the preceding call>","wait":true,"timeout_ms":60000}
 ```
 
-Keep waiting on that task while it is running; do not reinstall. Only a confirmed Git download failure caused by DNS, connection, timeout, interrupted transport, or HTTP 5xx allows one further download from `git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel` after the original process has ended. Do not switch sources for approval denial, certificate errors, 401/403/404/429/451, validation, builds, compatibility, loading, or OAuth issues. Do not grant build-script permissions or add version exemptions. Preserve the state and stop on other failures, cancellation, or unknown outcomes without replaying commands.
+Keep waiting on that task while it is running; do not reinstall. Only a confirmed Git download failure caused by DNS, connection, timeout, interrupted transport, or HTTP 5xx allows one further download from `git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel` after the original process has ended. Do not switch sources for approval denial, certificate errors, 401/403/404/429/451, validation, builds, compatibility, loading, or OAuth issues. Do not grant build-script permissions or add version exemptions. Preserve the state and stop on other failures, cancellation, or unknown outcomes without replaying commands.
 
 The CLI adds the new bundle to the enabled list, and the host first attempts online loading. Whenever the bundle loads, the plugin runs its bundled sign-in connection check once without automatic retries. Existing valid authorization is reused without reopening the authorization page. MCP mounts only after that same process outputs `OPENAGENT_LOGIN_CONNECTED` and exits with code 0. First authorization has a 330-second total limit, including 300 seconds for browser authorization, preventing native MCP initialization and probing from cutting authorization short. **Do not run `runtime/login.mjs` separately in the shell, reopen the authorization URL, or start a concurrent sign-in.** That entry reuses valid sign-in for the same endpoint. Authorize only `https://openagent.org/mcp/v1/open-agent`; do not copy, rewrite, or reuse authentication records from a different endpoint.
 
@@ -120,7 +120,7 @@ Perform other maintenance from a separate external terminal after confirming tha
 
 Both native removal paths above remove only the bundle and preserve sign-in for maintenance and updates. Use the complete uninstaller below to clean up local sign-in data.
 
-The complete one-line uninstaller is in the [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD). It requires curl and Python 3.9+ and runs only from an external Bash terminal after the profile is stopped. Append arguments after `python3 -`:
+The complete one-line uninstaller is in the [README](https://gitee.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD). It requires curl and Python 3.9+ and runs only from an external Bash terminal after the profile is stopped. Append arguments after `python3 -`:
 
 | Argument | Purpose |
 | --- | --- |

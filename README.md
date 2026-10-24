@@ -6,6 +6,8 @@
 
 ## 安装
 
+首次安装优先 Gitee；仅明确的网络下载失败才尝试 GitHub 备用源一次。已有可信的官方来源可以保留。
+
 在当前普通对话中，把[中文安装指南](./INSTALL.md)或[英文安装指南](./INSTALL.en.md)交给安装 Agent，要求实际安装和验收。Agent 使用当前宿主的 CLI 安装，保存一次验收预约并结束安装轮；用户处理必要审批和宿主打开的网页授权。
 
 插件优先在线加载。原安装会话空闲且唯一可见后，插件在同一工作区自动打开新对话并发送一次引导提示；原任务未归入工作区时沿用原工作目录。必要时按指南核对预约和连接状态，仅未领取预约的连接状态为 `not_started` 或 `ready` 时才正常重开并回到原会话继续；连接中等待原尝试，失败或未知时停止。无需用户重复发送提示。安装文件或预约就绪不等于验收通过，实际结果以引导和账号验证为准。插件显示名称为 **OpenAgent**，内部包名为 `dsh-openagent`。
@@ -19,8 +21,10 @@
 先结束相关任务并停止目标 profile；Desktop 须正常退出，再从独立的外部 Bash 终端执行以下一行脚本，需要 curl 和 Python 3.9+：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL --proto "=https" --proto-redir "=https" https://raw.githubusercontent.com/openagent-org/deepseek-harness-plugin/rel/uninstall.py | python3 - --yes'
+bash -o pipefail -c 'curl -fsSL --proto "=https" --proto-redir "=https" https://gitee.com/openagent-org/deepseek-harness-plugin/raw/rel/uninstall.py | python3 - --yes'
 ```
+
+若 Gitee 下载明确因网络失败且确认卸载尚未执行，可从 [GitHub 备用源](https://raw.githubusercontent.com/openagent-org/deepseek-harness-plugin/rel/uninstall.py) 下载一次；整条管道结果不明或卸载执行失败时停止，不自动换源重放。
 
 将 `--yes` 替换为 `--dry-run` 可只读预览动作和执行前提；多个 profile 已安装时添加 `--profile <名称>`。完整卸载脚本移除并核对官方插件后，检查同一 `DSH_HOME` 下所有 profile：仍有 OpenAgent 使用记录时保留登录并列出 profile；最后一个使用者移除且检查通过后，默认删除专用 `DSH_HOME/openagent-auth` 的全部缓存版本。旧版已移除插件但仍有认证缓存时，也可用同一脚本清理。
 

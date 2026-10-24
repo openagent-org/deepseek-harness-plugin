@@ -16,14 +16,14 @@
 
 ## 2. 用当前宿主 CLI 安装一次
 
-仅尚未安装时执行。先告知用户：“正在安装并连接 OpenAgent；如出现授权页，请在网页完成授权。”
+首次下载优先 Gitee，仅符合下述网络下载失败条件时使用 GitHub 备用源一次。仅尚未安装时执行。先告知用户：“正在安装并连接 OpenAgent；如出现授权页，请在网页完成授权。”
 
 macOS / Linux 的 `bash` 调用：
 
 ```json
 {
   "description": "在当前 Harness profile 安装 OpenAgent",
-  "command": ": \"${DSH_HOME:?未取得当前 Harness 主目录}\" \"${DSH_PROFILE:?未取得当前 profile}\" \"${DSH_PROFILE_DIR:?未取得当前 profile 路径}\" \"${DSH_SESSION_ID:?未取得当前会话标识}\"; \"<dsh 绝对路径>\" plugin --profile \"$DSH_PROFILE\" add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'",
+  "command": ": \"${DSH_HOME:?未取得当前 Harness 主目录}\" \"${DSH_PROFILE:?未取得当前 profile}\" \"${DSH_PROFILE_DIR:?未取得当前 profile 路径}\" \"${DSH_SESSION_ID:?未取得当前会话标识}\"; \"<dsh 绝对路径>\" plugin --profile \"$DSH_PROFILE\" add 'git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel'",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "本次安装需要下载官方插件并写入当前 Harness profile，由宿主加载 OpenAgent。"
@@ -35,7 +35,7 @@ Windows 的 `pwsh` 调用：
 ```json
 {
   "description": "在当前 Harness profile 安装 OpenAgent",
-  "command": "if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw '未取得当前 Harness profile 或会话标识' }; & '<dsh.cmd 绝对路径>' plugin --profile $env:DSH_PROFILE add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'",
+  "command": "if (-not $env:DSH_HOME -or -not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw '未取得当前 Harness profile 或会话标识' }; & '<dsh.cmd 绝对路径>' plugin --profile $env:DSH_PROFILE add 'git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel'",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "本次安装需要下载官方插件并写入当前 Harness profile，由宿主加载 OpenAgent。"
@@ -48,7 +48,7 @@ Windows 的 `pwsh` 调用：
 {"job_id":"<上一步的 jobId>","wait":true,"timeout_ms":60000}
 ```
 
-任务仍运行就继续等待原任务，不重新安装。仅明确发生 Git 下载的 DNS、连接、超时、传输中断或 HTTP 5xx 错误，且原进程已结束时，可将地址换为 `git+https://gitee.com/openagent-org/deepseek-harness-plugin.git#rel` 再下载一次。审批拒绝、证书错误、401/403/404/429/451、校验、构建、兼容性、加载或 OAuth 问题不换源；不授予构建脚本权限、不增加版本豁免。其他失败、取消或未知结果保留现场并停止，不重放命令。
+任务仍运行就继续等待原任务，不重新安装。仅明确发生 Git 下载的 DNS、连接、超时、传输中断或 HTTP 5xx 错误，且原进程已结束时，可将地址换为 `git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel` 再下载一次。审批拒绝、证书错误、401/403/404/429/451、校验、构建、兼容性、加载或 OAuth 问题不换源；不授予构建脚本权限、不增加版本豁免。其他失败、取消或未知结果保留现场并停止，不重放命令。
 
 CLI 会将新 bundle 加入启用列表，宿主优先在线加载。每次加载 bundle 时，插件自动运行一次包内登录连接检查，不自动重试；已有有效授权时复用且不再打开授权页。只有同一进程输出 `OPENAGENT_LOGIN_CONNECTED` 且退出码为 0 后才挂载 MCP。首次授权的总时限为 330 秒，网页等待 300 秒，避免原生 MCP 初始化和探测阶段截断授权。**不要在 shell 另跑 `runtime/login.mjs`、补开授权 URL 或并行启动第二次登录**。已有同端点有效登录由该入口复用。仅为 `https://openagent.org/mcp/v1/open-agent` 完成授权；不同端点的认证记录不得复制、改写或复用。
 
@@ -120,7 +120,7 @@ PowerShell：
 
 上述两种原生移除仅移除 bundle 并保留登录，适用于维护和更新；清理本地登录使用下面的完整卸载入口。
 
-完整卸载的一行入口见 [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+，仅在 profile 停止后从外部 Bash 执行。参数追加在 `python3 -` 后：
+完整卸载的一行入口见 [README](https://gitee.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+，仅在 profile 停止后从外部 Bash 执行。参数追加在 `python3 -` 后：
 
 | 参数 | 用途 |
 | --- | --- |
