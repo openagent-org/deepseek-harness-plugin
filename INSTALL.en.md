@@ -40,7 +40,7 @@ The native manager owns this profile's dependencies and plugin selection. Preser
 
 ## 3. Sign in once, then enable natively
 
-First check for trusted evidence of successful sign-in to this same endpoint and a usable connection; if present, skip duplicate sign-in. If an enabled plugin is already authorizing, wait for that attempt without starting a parallel login command. Authorization for the old domain does not authorize `https://openagent.org/mcp/v1/open-agent`. Migration requires the user's explicit authorization and one normal sign-in; preserve old authentication files without copying or rewriting Tokens.
+First check for trusted evidence of successful sign-in to this same endpoint and a usable connection; if present, skip duplicate sign-in. If an enabled plugin is already authorizing, wait for that attempt without starting a parallel login command. Authorize only `https://openagent.org/mcp/v1/open-agent`; do not copy, rewrite, or reuse authentication records from a different endpoint.
 
 When sign-in is needed, tell the user: “I am connecting OpenAgent. If an authorization page opens, complete authorization there; I will wait for the same process.” The installation Agent selects one native shell call for the platform, replaces the Node path, and runs it once.
 
