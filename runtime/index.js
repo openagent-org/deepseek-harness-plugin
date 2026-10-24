@@ -110,11 +110,14 @@ export async function apply(ctx) {
     })
     if (stopping || !await store.finishConnection(attemptId, 'ready')) throw new Error('OPENAGENT_LOGIN_UNCONFIRMED')
     if (stopping) throw new Error('OPENAGENT_LOGIN_UNCONFIRMED')
+    ctx.emit('openagent/connection')
   } catch (error) {
     await progress.catch(() => {})
     diagnostic = stopping ? { stage, code: 'CONNECTION_STOPPED' }
       : diagnostic ?? connectionFailure(error, stage, stage === 'preparing' ? 'DEPENDENCY_ERROR' : undefined)
-    try { if (attemptId) await store.finishConnection(attemptId, stopping ? 'unconfirmed' : 'failed', diagnostic) }
+    try {
+      if (attemptId && await store.finishConnection(attemptId, stopping ? 'unconfirmed' : 'failed', diagnostic)) ctx.emit('openagent/connection')
+    }
     catch { ctx.logger.error('OPENAGENT_CONNECTION_STATE_UNAVAILABLE: OpenAgent 连接阶段无法保存，请先检查本 profile 的私有状态文件。') }
     ctx.logger.error(`OPENAGENT_CONNECTION_DIAGNOSTIC ${JSON.stringify(diagnostic)}`)
     ctx.logger.error('OPENAGENT_MCP_UNAVAILABLE: OpenAgent MCP 首次连接失败；Skills 与浏览器桥接仍保留，不能据此宣称 OpenAgent 可用。请先修复连接，再由真实账户工具确认。')

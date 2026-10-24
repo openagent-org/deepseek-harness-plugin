@@ -45,14 +45,16 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     ctx.tools.guard(execution => this.beforeTool(execution))
     ctx.on('tools/result', (execution, result) => { this.observeTool(execution, result) })
     ctx.on('agent/status', ({ agent, status }) => { if (status === 'idle') void this.resumePending(agent) })
+    const resumeVisible = () => {
+      for (const id of new Set([...this.clients.values()].map(client => client.sessionId))) {
+        const agent = this.ctx.agents.get(id)
+        if (agent) void this.resumePending(agent)
+      }
+    }
+    ctx.on('openagent/connection', resumeVisible)
     ctx.effect(() => {
-      // CLI 可在 watch 已建立、原会话已空闲之后才写入预约；只观察可见会话。
-      const pendingTimer = setInterval(() => {
-        for (const id of new Set([...this.clients.values()].map(client => client.sessionId))) {
-          const agent = this.ctx.agents.get(id)
-          if (agent) void this.resumePending(agent)
-        }
-      }, PENDING_POLL_MS)
+      // 连接终态立即唤醒；轮询仅兜底观察外部 CLI 晚写入的预约。
+      const pendingTimer = setInterval(resumeVisible, PENDING_POLL_MS)
       pendingTimer.unref()
       return () => {
         clearInterval(pendingTimer)
@@ -183,6 +185,30 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     catch { return { status: 'unconfirmed', code: 'STATE_UNAVAILABLE' } }
   }
 
+  waitForConnection(request) {
+    return new Promise(resolve => {
+      let done = false
+      const finish = connection => {
+        if (done) return
+        done = true
+        clearInterval(timer)
+        unsubscribe()
+        resolve(connection)
+      }
+      const inspect = async () => {
+        if (done) return
+        const connection = await this.connectionDetails()
+        if (request.result || !['not_started', 'connecting'].includes(connection.status)) finish(connection)
+      }
+      const unsubscribe = this.ctx.on('openagent/connection', inspect)
+      const timer = setInterval(inspect, PENDING_POLL_MS)
+      timer.unref()
+      // 取消、超时和卸载沿用本次请求的终态，清理等待后绝不补发。
+      void request.promise.then(() => finish())
+      void inspect()
+    })
+  }
+
   finishConnection(request, connection) {
     if (connection.status === 'ready') return false
     request.finish(connection.status === 'failed' ? 'failed' : 'unconfirmed',
@@ -256,8 +282,9 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     this.targets.set(record.targetSessionId, request)
     signal.addEventListener('abort', abort, { once: true })
     if (signal.aborted) abort()
-    let connection = await this.connectionDetails()
-    if (this.finishConnection(request, connection)) return promise
+    // 原生验收工具保持原安装轮进行中；连接就绪后直接创建新会话，无需先等原轮 idle。
+    let connection = prepared ? await this.connectionDetails() : await this.waitForConnection(request)
+    if (request.result || this.finishConnection(request, connection)) return promise
     const unavailable = await this.readiness(execution.agent, signal)
     connection = await this.connectionDetails()
     if (request.result || this.finishConnection(request, connection)) return promise
@@ -395,7 +422,7 @@ export async function apply(ctx) {
     model: { services: [], events: [], objects: [] }, invocations: onboardingRemote.descriptors })
   await ctx.plugin({ inject: ['tools', 'openagentOnboarding'], apply: scope => {
     for (const [method, tool, description, parameters] of [
-      ['start', 'openagent_install_verify', '仅用于用户已授权的 OpenAgent 安装验收：在当前唯一可见窗口新建对话并发送一次固定新用户引导。只在真实引导、账号工具成功且该轮完成后确认成功；失败或未知不得重试，改用 status。', { locale: { type: 'string', enum: ['zh-CN', 'en'], required: true } }],
+      ['start', 'openagent_install_verify', '仅用于用户已授权的 OpenAgent 安装验收：保持当前安装轮进行中，等待同一次连接就绪后，在唯一可见窗口新建对话并发送一次固定新用户引导。最多等待600秒；只在真实引导、账号工具成功且该轮完成后确认成功。失败、取消或未知不得重试，改用 status。', { locale: { type: 'string', enum: ['zh-CN', 'en'], required: true } }],
       ['status', 'openagent_install_status', '只读取本安装会话已发起验收的脱敏状态，不创建对话、不重发引导。', {}],
     ]) scope.tools.register(defineTool({ name: tool, description, parameters,
       output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
