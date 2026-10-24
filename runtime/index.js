@@ -20,7 +20,7 @@ export async function apply(ctx) {
   })
   ctx.inject(['typert'], async scope => { await scope.plugin(Browser) })
   // 在线新增 bundle 时先注册 Remote；授权期间预约保持待处理，不领取发送。
-  ctx.inject(['typert', 'agents', 'sessions', 'profileContext', 'workingDirectory'], async scope => {
+  ctx.inject(['typert', 'agents', 'sessions', 'profileContext', 'workingDirectory', 'workspaceRegistry'], async scope => {
     await scope.plugin(Onboarding)
   })
   let store, attemptId, login, closed, stopping

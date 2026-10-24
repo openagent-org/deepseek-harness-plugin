@@ -15,10 +15,12 @@ const id = value => { if (typeof value !== 'string' || !value || value.length > 
 const hash = value => createHash('sha256').update(id(value)).digest('hex')
 const versionOk = value => typeof value === 'string' && value.length <= 100 && /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(value)
 const checkedRecord = value => {
-  exact(value, ['targetSessionId', 'requestId', 'promptId', 'locale'])
+  exact(value, ['targetSessionId', 'requestId', 'promptId', 'locale', 'sourceTurn'])
   for (const key of ['targetSessionId', 'requestId', 'promptId']) id(value[key])
   if (!['zh-CN', 'en'].includes(value.locale)) fail()
-  return { targetSessionId: value.targetSessionId, requestId: value.requestId, promptId: value.promptId, locale: value.locale }
+  if ('sourceTurn' in value && (!Number.isSafeInteger(value.sourceTurn) || value.sourceTurn <= 0)) fail()
+  return { targetSessionId: value.targetSessionId, requestId: value.requestId, promptId: value.promptId, locale: value.locale,
+    ...('sourceTurn' in value ? { sourceTurn: value.sourceTurn } : {}) }
 }
 const resultKeys = ['status', 'request_id', 'session_id', 'code', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed']
 const checkedResult = (value, record) => {
@@ -170,6 +172,13 @@ export function createOnboardingStore({ profileDir, version }) {
       const state = await load(source)
       if (!await folder()) return null
       return await receipt(source, state) ?? (state ? unknown(state.record) : null)
+    },
+    async readCompletion(source) {
+      id(source)
+      const state = await load(source)
+      const result = await receipt(source, state)
+      if (result?.status !== 'completed' || state.record.sourceTurn === undefined) return null
+      return { sourceTurn: state.record.sourceTurn, locale: state.record.locale, result }
     },
     async pendingStatus(source) {
       id(source)

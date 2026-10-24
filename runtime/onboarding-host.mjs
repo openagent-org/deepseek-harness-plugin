@@ -72,14 +72,25 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     const queue = []
     let wake
     let stopped = false
+    let completionId
     const client = { key, sessionId: agent.id,
-      send: value => { queue.push(value); wake?.(); wake = undefined },
+      send: value => {
+        if (value.type === 'completed') {
+          if (completionId === value.completion.result.request_id) return
+          completionId = value.completion.result.request_id
+        }
+        queue.push(value); wake?.(); wake = undefined
+      },
       stop: () => { stopped = true; wake?.(); wake = undefined } }
     this.clients.set(key, client)
     const abort = () => client.stop()
     signal.addEventListener('abort', abort, { once: true })
     try {
       yield { type: 'ready', sessionId: agent.id }
+      try {
+        const completion = await this.store.readCompletion(agent.id)
+        if (completion) client.send({ type: 'completed', sessionId: agent.id, completion })
+      } catch { this.ctx.logger.warn('OPENAGENT_ONBOARDING_COMPLETION_UNAVAILABLE') }
       void this.resumePending(agent)
       while (!stopped && !signal.aborted) {
         if (!queue.length) await new Promise(resolve => { wake = resolve })
@@ -175,7 +186,7 @@ export class OpenAgentOnboarding extends TypertRemoteService {
     const id = sourceId(execution)
     if (!id || this.ctx.agents.get(id) !== execution.agent) return { status: 'failed', code: 'NO_SESSION' }
     if (this.sources.has(id)) return this.sources.get(id).promise
-    const record = prepared ?? { requestId: randomUUID(), targetSessionId: randomUUID(), promptId: randomUUID(), locale: args.locale }
+    const record = { ...(prepared ?? { requestId: randomUUID(), targetSessionId: randomUUID(), promptId: randomUUID(), locale: args.locale }) }
     try { onboardingPrompt(record.locale) } catch { return receipt(record, 'failed', 'INVALID_LOCALE') }
     const signal = AbortSignal.any([execution.signal, this.lifetime.signal])
     let clientKey
@@ -188,6 +199,10 @@ export class OpenAgentOnboarding extends TypertRemoteService {
         && this.pendingClient(execution.agent, clientKey) !== undefined && this.hasRequiredTools(execution.agent)
       if (!canReserve()) return
     }
+    // 只保存实际领取时源会话的可信轮次；后续聊天不会改变完成入口的位置。
+    delete record.sourceTurn
+    const sourceTurn = execution.agent.session.snapshotEvents().findLast(event => event.type === 'turn/start')?.data.turn
+    if (Number.isSafeInteger(sourceTurn) && sourceTurn > 0) record.sourceTurn = sourceTurn
     let reserved
     try { reserved = await this.store.reserve(id, record, canReserve) } catch { return receipt(record, 'failed', 'STATE_UNAVAILABLE') }
     if (reserved.deferred) return
@@ -204,7 +219,11 @@ export class OpenAgentOnboarding extends TypertRemoteService {
       if (status === 'completed') Object.assign(request.result, { guide_loaded: true, guide_success: true, account_success: true, turn_completed: true })
       clearTimeout(timer)
       signal.removeEventListener('abort', abort)
-      void this.store.complete(id, request.result).catch(() => {
+      void this.store.complete(id, request.result).then(result => {
+        if (result.status !== 'completed' || record.sourceTurn === undefined) return
+        const completion = { sourceTurn: record.sourceTurn, locale: record.locale, result }
+        for (const client of this.visibleClients(id)) client.send({ type: 'completed', sessionId: id, completion })
+      }).catch(() => {
         request.result = receipt(record, 'unconfirmed', 'STATE_UNAVAILABLE')
       }).finally(() => { request.persisted = true; resolve(request.result) })
     }
@@ -224,8 +243,14 @@ export class OpenAgentOnboarding extends TypertRemoteService {
       else if (this.ctx.sessions.get(record.targetSessionId)) request.finish('failed', 'TARGET_NOT_BLANK')
       else {
         request.clientKey = clients[0].key
-        clients[0].send({ type: 'verify', sessionId: id, ...record,
-          cwd: this.ctx.workingDirectory.get(execution.agent.session), expiresAt: request.expiresAt })
+        let location
+        try {
+          const workspace = this.ctx.workspaceRegistry.list().find(item => item.sessionIds.includes(id))
+          location = workspace ? { workspaceId: workspace.id } : { cwd: this.ctx.workingDirectory.get(execution.agent.session) }
+        } catch { request.finish('failed', 'STATE_UNAVAILABLE'); return promise }
+        clients[0].send({ type: 'verify', sessionId: id, requestId: record.requestId,
+          targetSessionId: record.targetSessionId, promptId: record.promptId, locale: record.locale,
+          ...location, expiresAt: request.expiresAt })
       }
     }
     return promise
@@ -331,7 +356,7 @@ export class OpenAgentOnboarding extends TypertRemoteService {
   }
 }
 
-export const inject = ['tools', 'skills', 'typert', 'agents', 'sessions', 'profileContext', 'workingDirectory']
+export const inject = ['tools', 'skills', 'typert', 'agents', 'sessions', 'profileContext', 'workingDirectory', 'workspaceRegistry']
 export async function apply(ctx) {
   await ctx.plugin(OpenAgentOnboarding)
   ctx.typert.register({ package: onboardingRemote.package, face: 'host', schemas: [],

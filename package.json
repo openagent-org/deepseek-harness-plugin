@@ -1,6 +1,6 @@
 {
   "name": "dsh-openagent",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
   "type": "module",
   "main": "runtime/index.js",
@@ -14,7 +14,7 @@
     "bundle": { "patch": "./runtime/cordis.patch.yml" },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-ui-sidebar-right", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-conversation"],
+      "inject": ["@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-client-ui-sidebar-right", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-chat", "@deepseek-ai/dsh-client-ui-renderer"],
       "external": []
     }
   },
@@ -27,6 +27,7 @@
     "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-rc.2 <0.3.0"
   },
   "devDependencies": {
+    "react": "18.3.1",
     "@deepseek-ai/dsh-app-boot": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-modules": "0.2.1-rc.2",
     "@deepseek-ai/cordis": "4.0.5",

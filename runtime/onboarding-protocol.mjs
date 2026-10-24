@@ -45,18 +45,34 @@ const receipt = codec('Receipt', value => {
   return value
 })
 const message = codec('Message', value => {
-  exact(value, ['type', 'sessionId', 'requestId', 'targetSessionId', 'promptId', 'locale', 'cwd', 'expiresAt'])
-  if (!['ready', 'verify'].includes(value.type)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+  if (!['ready', 'verify', 'completed'].includes(value?.type)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
   id(value.sessionId)
-  if (value.type === 'verify') {
-    id(value.requestId); id(value.targetSessionId); id(value.promptId)
-    onboardingPrompt(value.locale)
-    if (typeof value.cwd !== 'string' || !value.cwd || value.cwd.length > 16384 || !Number.isFinite(value.expiresAt)) {
+  if (value.type === 'ready') exact(value, ['type', 'sessionId'])
+  else if (value.type === 'completed') {
+    exact(value, ['type', 'sessionId', 'completion'])
+    const completion = exact(value.completion, ['sourceTurn', 'locale', 'result'])
+    if (!Number.isSafeInteger(completion.sourceTurn) || completion.sourceTurn <= 0) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    onboardingPrompt(completion.locale)
+    const result = exact(completion.result, ['status', 'request_id', 'session_id', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed'])
+    id(result.request_id); id(result.session_id)
+    if (result.status !== 'completed' || ['guide_loaded', 'guide_success', 'account_success', 'turn_completed'].some(key => result[key] !== true)) {
       throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
     }
+  } else {
+    exact(value, ['type', 'sessionId', 'requestId', 'targetSessionId', 'promptId', 'locale', 'cwd', 'workspaceId', 'expiresAt'])
+    id(value.requestId); id(value.targetSessionId); id(value.promptId)
+    onboardingPrompt(value.locale)
+    if ('workspaceId' in value) {
+      id(value.workspaceId)
+      if ('cwd' in value) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    } else if (typeof value.cwd !== 'string' || !value.cwd || value.cwd.length > 16384) {
+      throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    }
+    if (!Number.isFinite(value.expiresAt)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
   }
   return value
 })
+
 const agent = { name: 'agent', wire: 'agentId', source: 'lookup', lookup: 'agent',
   codec: { ...identity, typeSymbol: '@deepseek-ai/dsh-session/types#SessionId' } }
 const parameter = (name, codec) => ({ name, wire: name, source: 'json', codec })

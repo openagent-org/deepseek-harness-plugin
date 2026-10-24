@@ -1,7 +1,7 @@
 // 由 scripts/build_client.mjs 生成；修改 browser / onboarding 的 client 与 protocol 源文件。
 window.__ModuleLoader__.load({
   id: 'dsh-openagent',
-  factory: () => {
+  factory: require => {
     const browser = (() => {
 // 两侧共享官方 Typert descriptor；严格 codec 只接受本桥接的字段。
 const id = (value) => {
@@ -268,18 +268,34 @@ const receipt = codec('Receipt', value => {
   return value
 })
 const message = codec('Message', value => {
-  exact(value, ['type', 'sessionId', 'requestId', 'targetSessionId', 'promptId', 'locale', 'cwd', 'expiresAt'])
-  if (!['ready', 'verify'].includes(value.type)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+  if (!['ready', 'verify', 'completed'].includes(value?.type)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
   id(value.sessionId)
-  if (value.type === 'verify') {
-    id(value.requestId); id(value.targetSessionId); id(value.promptId)
-    onboardingPrompt(value.locale)
-    if (typeof value.cwd !== 'string' || !value.cwd || value.cwd.length > 16384 || !Number.isFinite(value.expiresAt)) {
+  if (value.type === 'ready') exact(value, ['type', 'sessionId'])
+  else if (value.type === 'completed') {
+    exact(value, ['type', 'sessionId', 'completion'])
+    const completion = exact(value.completion, ['sourceTurn', 'locale', 'result'])
+    if (!Number.isSafeInteger(completion.sourceTurn) || completion.sourceTurn <= 0) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    onboardingPrompt(completion.locale)
+    const result = exact(completion.result, ['status', 'request_id', 'session_id', 'guide_loaded', 'guide_success', 'account_success', 'turn_completed'])
+    id(result.request_id); id(result.session_id)
+    if (result.status !== 'completed' || ['guide_loaded', 'guide_success', 'account_success', 'turn_completed'].some(key => result[key] !== true)) {
       throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
     }
+  } else {
+    exact(value, ['type', 'sessionId', 'requestId', 'targetSessionId', 'promptId', 'locale', 'cwd', 'workspaceId', 'expiresAt'])
+    id(value.requestId); id(value.targetSessionId); id(value.promptId)
+    onboardingPrompt(value.locale)
+    if ('workspaceId' in value) {
+      id(value.workspaceId)
+      if ('cwd' in value) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    } else if (typeof value.cwd !== 'string' || !value.cwd || value.cwd.length > 16384) {
+      throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
+    }
+    if (!Number.isFinite(value.expiresAt)) throw new Error('OPENAGENT_ONBOARDING_INVALID_MESSAGE')
   }
   return value
 })
+
 const agent = { name: 'agent', wire: 'agentId', source: 'lookup', lookup: 'agent',
   codec: { ...identity, typeSymbol: '@deepseek-ai/dsh-session/types#SessionId' } }
 const parameter = (name, codec) => ({ name, wire: name, source: 'json', codec })
@@ -336,7 +352,10 @@ function createOnboardingHandler(ctx, document) {
     if (!usable(request, signal)) return failure('REQUEST_EXPIRED', 'failed')
     if (!visible(request.sessionId)) return failure('SESSION_NOT_VISIBLE', 'failed')
     let target
-    try { target = await ctx.sessions.create({ sessionId: request.targetSessionId, cwd: request.cwd }) }
+    try {
+      const location = request.workspaceId === undefined ? { cwd: request.cwd } : { workspaceId: request.workspaceId }
+      target = await ctx.sessions.create({ sessionId: request.targetSessionId, ...location })
+    }
     catch { return failure('CREATE_UNCONFIRMED') }
     if (target !== request.targetSessionId) return failure('SESSION_ID_MISMATCH')
     if (!usable(request, signal) || !visible(request.sessionId)) return failure('SESSION_CHANGED')
@@ -372,18 +391,64 @@ function createOnboardingHandler(ctx, document) {
   }
 }
 
+// 使用宿主的 React 单例；结果属于固定源轮次，按钮只导航已经创建的引导会话。
+function createOnboardingResultCard(createElement) {
+  return function OnboardingResultCard({ turn, useCompletion, openGuide }) {
+    const completion = useCompletion(value => value)
+    if (!completion || completion.sourceTurn !== turn.turn) return null
+    const { result } = completion
+    if (result.status !== 'completed') return null
+    const english = completion.locale === 'en'
+    return createElement('section', {
+      'data-openagent-install-result': result.request_id,
+      style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px',
+        justifyContent: 'space-between', padding: '12px 14px', margin: '8px 0',
+        border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '12px',
+        background: 'var(--dsw-alias-button-floating-fill)', color: 'var(--dsw-alias-label-primary)' },
+    }, createElement('span', { style: { fontSize: '13px' } },
+      english ? 'OpenAgent installation and account verification passed' : 'OpenAgent 安装及账号验证通过'),
+    createElement('button', {
+      type: 'button', 'data-openagent-open-guide': result.session_id,
+      onClick: () => openGuide(result.session_id),
+      style: { flexShrink: 0, padding: '6px 10px', border: '1px solid var(--dsw-alias-border-l3)',
+        borderRadius: '8px', background: 'transparent', color: 'inherit', font: 'inherit',
+        fontSize: '13px', cursor: 'pointer' },
+    }, english ? 'Open new user guide' : '打开新用户引导'))
+  }
+}
+
 // 在缺少会话 UI 的 Host 上只挂起本功能，浏览器桥接仍可独立加载。
-function applyOnboarding(ctx) {
+function applyOnboarding(ctx, createElement) {
   ctx.inject(inject, async scope => {
     await scope.remote.$mount(onboardingRemote)
-    await scope.plugin({ inject: [...inject, 'remote.openagentOnboarding'], apply: startOnboardingClient })
+    await scope.plugin({ inject: [...inject, 'remote.openagentOnboarding'], apply: client => startOnboardingClient(client, createElement) })
   })
 }
 
-function startOnboardingClient(ctx) {
+function startOnboardingClient(ctx, createElement) {
   const page = document
   const clientId = crypto.randomUUID()
   const handle = createOnboardingHandler(ctx, page)
+  const completions = new Map()
+  const completionFor = id => {
+    if (!completions.has(id)) {
+      let value
+      const listeners = new Set()
+      completions.set(id, { getSnapshot: () => value,
+        subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
+        set: next => { value = next; for (const listener of listeners) listener() } })
+    }
+    return completions.get(id)
+  }
+  ctx.inject(['slots'], scope => {
+    scope.slots.inject('conversation.chat.turnTail', () => scope.slots.register({
+      name: 'conversation.chat.turnTail', id: 'openagent-installation-result', order: 30,
+      inject: id => ({ hooks: { completion: completionFor(id) },
+        openGuide: target => {
+          if (completionFor(id).getSnapshot()?.result.session_id === target) ctx.uiWorkspace.openSession(target)
+        } }),
+    }, createOnboardingResultCard(createElement)))
+  })
   let stream
   let sessionId
   let pinned = false
@@ -406,7 +471,8 @@ function startOnboardingClient(ctx) {
         for await (const item of active) {
           const request = item.value
           if (request.sessionId !== next) throw new Error('OPENAGENT_ONBOARDING_SESSION_MISMATCH')
-          if (request.type === 'ready') { item.accept(); continue }
+          if (request.type === 'ready') { completionFor(next).set(undefined); item.accept(); continue }
+          if (request.type === 'completed') { completionFor(next).set(request.completion); item.accept(); continue }
           pinned = true
           try {
             const claim = await ctx.remote.openagentOnboarding.claim(next, clientId, request.requestId)
@@ -434,6 +500,7 @@ function startOnboardingClient(ctx) {
     page.removeEventListener('visibilitychange', synchronize)
     await changes
     await stream?.dispose()
+    completions.clear()
   }, 'openagent-onboarding.client')
   synchronize()
 }
@@ -442,7 +509,7 @@ function startOnboardingClient(ctx) {
     })()
     return { name: 'openagent-client', inject: ['remote'], async apply(ctx) {
       await ctx.plugin(browser)
-      onboarding.applyOnboarding(ctx)
+      onboarding.applyOnboarding(ctx, require('react').createElement)
     } }
   },
 })
