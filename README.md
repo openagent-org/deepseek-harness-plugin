@@ -22,4 +22,6 @@
 bash -o pipefail -c 'curl -fsSL --proto "=https" --proto-redir "=https" https://raw.githubusercontent.com/openagent-org/deepseek-harness-plugin/rel/uninstall.py | python3 - --yes'
 ```
 
-将 `--yes` 替换为 `--dry-run` 可预览；多个 profile 已安装时添加 `--profile <名称>`。脚本只处理官方安装，保留其他插件、配置和共享登录状态。当前宿主有原生管理工具时也可按[更新与移除说明](./INSTALL.md#更新与移除)处理；首次在线安装不扩大为在线维护授权。自定义目录和 Desktop 定位参数见上述说明；失败或结果未知时停止，不自动重试。
+将 `--yes` 替换为 `--dry-run` 可只读预览动作和执行前提；多个 profile 已安装时添加 `--profile <名称>`。完整卸载脚本移除并核对官方插件后，检查同一 `DSH_HOME` 下所有 profile：仍有 OpenAgent 使用记录时保留登录并列出 profile；最后一个使用者移除且检查通过后，默认删除专用 `DSH_HOME/openagent-auth` 的全部缓存版本。旧版已移除插件但仍有认证缓存时，也可用同一脚本清理。
+
+原生 `plugin_manager` 或 CLI 的 remove 仅移除 bundle、保留登录，适用于[维护与更新](./INSTALL.md#更新与移除)。完整卸载不删除其他插件的认证、`.mcp-auth`、会话或 `.openagent-onboarding`，也不撤销服务端授权。自定义目录、停止要求和清理失败处理见上述指南；状态不明或失败时停止，不自动重试。

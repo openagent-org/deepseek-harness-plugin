@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -128,7 +129,7 @@ def locate_cli(profile: str, app=None) -> Path:
     return candidates[0]
 
 
-def running_profile(profile: str, cli: Path) -> bool:
+def running_profile(profile, cli=None) -> bool:
     """官方没有运行期 profile PID 文件；仅识别官方入口，命令行留在内存。"""
     try:
         if sys.platform == "win32":
@@ -161,11 +162,13 @@ def running_profile(profile: str, cli: Path) -> bool:
                           r"|/@deepseek-ai/dsh-desktop-host/lib/(?:cli|index)\.js|(?:^|\s)(?:\S*/)?dsh(?:\.cmd)?)(?=[\s\"']|$)", normalized)
         host_desktop = re.search(r"/@deepseek-ai/dsh-desktop-host/lib/index\.js(?=[\s\"']|$)", normalized)
         if host_desktop or (desktop and not entry):
-            if profile == "desktop":
+            if profile is None or profile == "desktop":
                 return True
             continue
-        if not desktop and not entry and str(cli).replace("\\", "/") not in normalized:
+        if not desktop and not entry and (cli is None or str(cli).replace("\\", "/") not in normalized):
             continue
+        if profile is None:
+            return True
         selected = re.search(r'(?:^|\s)--profile(?:=|\s+)(?:"([^"\r\n]+)"|\'([^\'\r\n]+)\'|([^\s"\']+))', normalized)
         selected_name = next((part for part in selected.groups() if part is not None), None) if selected else None
         if selected_name and not re.search(r"\s", profile) and selected_name.lower() != profile.lower():
@@ -196,30 +199,142 @@ def other_manifest(manifest: dict) -> dict:
     return value
 
 
+def auth_profiles(home: Path, excluded=None):
+    """其他 profile 的任何 OpenAgent 使用迹象均保留凭据，不要求它也来自官方源。"""
+    profiles = home / "profiles"
+    if profiles.is_symlink() or profiles.resolve() != profiles or (profiles.exists() and not profiles.is_dir()):
+        raise ValueError("profiles 目录不可核实")
+    directories, users = [], []
+    for directory in sorted(profiles.iterdir()) if profiles.exists() else []:
+        if directory == excluded:
+            continue
+        if directory.is_symlink() or directory.resolve() != directory:
+            raise ValueError("profile 目录包含链接")
+        if not directory.is_dir():
+            continue
+        directories.append(directory)
+        package = directory / "node_modules" / PLUGIN
+        if package.exists() or package.is_symlink():
+            users.append(directory.name)
+            continue
+        manifest = directory / "package.json"
+        if not manifest.exists() and not manifest.is_symlink():
+            continue
+        value = read_json(manifest)
+        using = False
+        for field in DEPENDENCIES:
+            dependencies = value.get(field, {})
+            if not isinstance(dependencies, dict):
+                raise ValueError("profile 依赖清单不可核实")
+            using = using or PLUGIN in dependencies
+        dsh = value.get("dsh", {})
+        settings = dsh.get("profile", {}) if isinstance(dsh, dict) else None
+        bundles = settings.get("bundles", []) if isinstance(settings, dict) else None
+        if not isinstance(bundles, list) or any(not isinstance(name, str) for name in bundles):
+            raise ValueError("profile bundle 清单不可核实")
+        if using or PLUGIN in bundles:
+            users.append(directory.name)
+    return directories, users
+
+
+def check_auth_tree(path: Path) -> None:
+    """只检查文件类型，不读取登录正文，也不跟随链接或 Windows junction。"""
+    info = path.lstat()
+    if path.is_symlink() or path.resolve() != path:
+        raise ValueError("OpenAgent 认证目录包含链接")
+    if stat.S_ISDIR(info.st_mode):
+        for child in path.iterdir():
+            check_auth_tree(child)
+    elif not stat.S_ISREG(info.st_mode):
+        raise ValueError("OpenAgent 认证目录包含非普通文件")
+
+
+def clean_auth(home: Path, *, dry_run=False, excluded=None) -> None:
+    auth = home / "openagent-auth"
+    if not auth.exists() and not auth.is_symlink():
+        print("未发现 OpenAgent 本地登录凭据；无需清理。")
+        return
+    try:
+        directories, users = auth_profiles(home, excluded)
+    except (OSError, ValueError):
+        raise RuntimeError("无法核实其他 profile 是否仍使用 OpenAgent，登录凭据已保留，清理未完成。") from None
+    if users:
+        print("OpenAgent 登录凭据已保留：以下 profile 仍有 OpenAgent 安装或使用记录：" + ", ".join(repr(name) for name in users) + "。")
+        return
+    try:
+        if auth.is_symlink() or not auth.is_dir() or auth.resolve() != auth:
+            raise ValueError("认证路径不是普通目录")
+        check_auth_tree(auth)
+        # 已卸载的 Host 也可能仍在内存中持有凭据；清理前核实同主目录各 profile。
+        for directory in directories:
+            check_stopped(directory, None)
+        if not directories and running_profile(None):
+            raise RuntimeError("Harness 仍在运行")
+        if dry_run:
+            print("预览：无其他 profile 使用 OpenAgent；卸载后将清理专用 openagent-auth 内全部版本的本地登录凭据。")
+            return
+        # 原生移除和检查期间可能出现新的使用者，删除前重新核对。
+        latest, users = auth_profiles(home)
+        if users:
+            print("OpenAgent 登录凭据已保留：以下 profile 仍有 OpenAgent 安装或使用记录：" + ", ".join(repr(name) for name in users) + "。")
+            return
+        if latest != directories:
+            raise RuntimeError("profile 列表发生变化")
+        check_auth_tree(auth)
+        shutil.rmtree(auth)
+        if auth.exists() or auth.is_symlink():
+            raise OSError("认证目录仍存在")
+    except (ValueError, RuntimeError) as error:
+        raise RuntimeError(f"OpenAgent 登录凭据已保留，清理未完成：{error}") from None
+    except OSError:
+        raise RuntimeError("OpenAgent 登录凭据清理未完成：文件系统操作失败，可能仍有残留；请核对权限和现场，未自动重试。") from None
+    print("已清理 OpenAgent 专用 openagent-auth 全部版本的本地登录凭据；未撤销服务端授权。")
+
+
+def confirm_uninstall(yes: bool) -> None:
+    if yes:
+        return
+    if not sys.stdin.isatty():
+        raise RuntimeError("非交互卸载需要 --yes；可先使用 --dry-run")
+    if input("确认卸载 OpenAgent 并按 profile 使用情况清理登录凭据？输入 yes 继续：").strip().lower() != "yes":
+        raise RuntimeError("用户取消，未执行卸载")
+
+
 def uninstall(home: Path, *, profile=None, desktop_app=None, yes=False, dry_run=False) -> None:
     home = home.expanduser().resolve()
     if home == Path(home.anchor) or (home.exists() and not home.is_dir()):
         raise ValueError("DSH_HOME 必须是 Harness 主目录，不能是文件系统根目录或普通文件")
     directory, before = select_profile(home, profile)
     if before is None:
-        print("未发现目标 profile 中已安装的 OpenAgent 或冲突残留；无需卸载。")
+        print("未发现目标 profile 中已安装的 OpenAgent 或冲突残留；继续核对本地登录凭据。")
+        auth = home / "openagent-auth"
+        if not dry_run and (auth.exists() or auth.is_symlink()):
+            confirm_uninstall(yes)
+        try:
+            clean_auth(home, dry_run=dry_run)
+        except RuntimeError as error:
+            if not dry_run:
+                raise
+            print(f"执行前须处理：{error}")
+        if dry_run:
+            print("预览完成，未调用原生卸载命令，也未写入任何文件。")
         return
     cli = locate_cli(directory.name, desktop_app)
     print(f"目标主目录：{home}\n目标 profile：{directory.name}\n原生 CLI：{cli}")
-    print("将仅移除 dsh-openagent；保留其他插件、配置和共享 openagent-auth。")
+    print("将仅移除 dsh-openagent；无其他 profile 使用时清理 OpenAgent 登录凭据，保留其他插件和配置。")
     if dry_run:
         try:
             check_stopped(directory, cli)
         except RuntimeError as error:
             print(f"执行前须处理：{error}")
+        try:
+            clean_auth(home, dry_run=True, excluded=directory)
+        except RuntimeError as error:
+            print(f"执行前须处理：{error}")
         print("预览完成，未调用原生卸载命令，也未写入任何文件。")
         return
     check_stopped(directory, cli)
-    if not yes:
-        if not sys.stdin.isatty():
-            raise RuntimeError("非交互卸载需要 --yes；可先使用 --dry-run")
-        if input("确认卸载 OpenAgent？输入 yes 继续：").strip().lower() != "yes":
-            raise RuntimeError("用户取消，未执行卸载")
+    confirm_uninstall(yes)
     if inspect_profile(directory) != before:
         raise RuntimeError("确认期间安装状态发生变化，停止卸载")
     check_stopped(directory, cli)
@@ -236,7 +351,8 @@ def uninstall(home: Path, *, profile=None, desktop_app=None, yes=False, dry_run=
         raise RuntimeError("原生命令结束后插件依赖仍存在，卸载未完成")
     if other_manifest(before) != other_manifest(after):
         raise RuntimeError("原生命令修改了其他 profile 清单字段，请核对现场；不自动回滚或重试")
-    print("OpenAgent 已从该 profile 卸载，依赖、原生 bundle 和包路径已核对；共享认证目录保留。")
+    print("OpenAgent 已从该 profile 卸载，依赖、原生 bundle 和包路径已核对。")
+    clean_auth(home)
 
 
 def main(argv=None) -> int:

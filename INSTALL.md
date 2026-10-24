@@ -118,13 +118,21 @@ PowerShell：
 
 其他维护从独立外部终端进行：确认目标 profile 已停止，保留原 `DSH_HOME` 和 profile，Desktop 使用该应用内置 dsh。执行 `"<dsh 绝对路径>" plugin --profile "<原 profile>" remove dsh-openagent`；确认移除后才能按已授权更新要求重新安装。不要从将被关闭的聊天运行退出或卸载脚本，不清理包管理锁。已有有效登录不重复授权；失败、取消或未知结果停止。
 
-一行卸载入口见 [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+，仅在 profile 停止后从外部 Bash 执行。参数追加在 `python3 -` 后：
+上述两种原生移除仅移除 bundle 并保留登录，适用于维护和更新；清理本地登录使用下面的完整卸载入口。
+
+完整卸载的一行入口见 [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+，仅在 profile 停止后从外部 Bash 执行。参数追加在 `python3 -` 后：
 
 | 参数 | 用途 |
 | --- | --- |
-| `--yes` / `--dry-run` | 执行已核对的卸载 / 只读预览。 |
+| `--yes` / `--dry-run` | 执行已核对的卸载及适用的认证清理 / 只读列出动作和执行前提，不写文件。 |
 | `--profile <名称>` | 指定原 profile；多个官方安装时必须明确指定。 |
 | `--dsh-home <路径>` | 指定原 Harness 主目录；缺省读取非空 `DSH_HOME`，否则使用 `~/.dsh`。 |
 | `--desktop-app <路径>` | 指定 macOS 的 `.app` 或 Windows 安装根目录，定位内置 dsh。 |
 
-脚本无法核实运行状态或发现包管理锁时停止，不终止进程、不清理锁。macOS 检查标准应用目录，Windows 使用已注册的内置 dsh；无法唯一定位时使用 `--desktop-app`。Linux Desktop 使用原生管理页面，卸载脚本不支持该场景。保留其他插件、配置和共享的 `DSH_HOME/openagent-auth`；本地卸载不等于撤销服务端授权，不能删除整个主目录或其他客户端凭据。
+原生移除前须确认目标 profile 已停止且无包管理锁；脚本不终止进程或清理锁。macOS 检查标准应用目录，Windows 使用已注册的内置 dsh；无法唯一定位时使用 `--desktop-app`。Linux Desktop 的 bundle 移除使用原生管理页面，该脚本不支持该移除场景。
+
+原生移除成功并回读确认后，完整卸载脚本检查同一 `DSH_HOME` 下所有 profile。任何来源的 `dsh-openagent` 依赖、bundle 登记或包路径（包括失效链接）均算使用记录；仍有使用记录时保留登录，列出对应 profile，并正常结束。只有确认没有其他使用者、该主目录各 profile 均已停止、没有包管理锁，且专用认证路径及整棵目录树无符号链接、Windows junction 或特殊文件时，才删除整个 `DSH_HOME/openagent-auth`，包含全部缓存版本。删除前再次核对使用记录和路径。
+
+实际执行时，无法核实其他 profile、运行状态或路径，或发现锁、异常文件，将保留认证缓存并以非零退出码报告“清理未完成”；删除期间发生文件系统错误时也以非零退出码报告可能仍有残留，不自动重试。旧版已移除插件而仅剩认证缓存时，可用同一脚本执行 `--yes` 或 `--dry-run`，无需为清理缓存再找到 dsh CLI；认证缓存也不存在时重复运行无操作。
+
+清理不读取凭据正文、不备份 Token，保留其他插件、配置、其他认证目录（包括 `.mcp-auth`）、会话及 `.openagent-onboarding`。本地删除不等于撤销服务端授权，不能删除整个主目录或其他客户端凭据。

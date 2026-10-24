@@ -118,13 +118,21 @@ If the current conversation actually exposes `plugin_manager`, host approval and
 
 Perform other maintenance from a separate external terminal after confirming that the target profile is stopped. Preserve its original `DSH_HOME` and profile, using the application's built-in dsh for Desktop. Run `"<absolute dsh path>" plugin --profile "<original profile>" remove dsh-openagent`; only reinstall for an authorized update after removal is confirmed. Do not run exit or uninstall scripts from the conversation that will be closed, and do not clear package-manager locks. Do not repeat authorization when valid sign-in already exists. Stop on failure, cancellation, or an unknown outcome.
 
-The one-line uninstaller is in the [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD). It requires curl and Python 3.9+ and runs only from an external Bash terminal after the profile is stopped. Append arguments after `python3 -`:
+Both native removal paths above remove only the bundle and preserve sign-in for maintenance and updates. Use the complete uninstaller below to clean up local sign-in data.
+
+The complete one-line uninstaller is in the [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD). It requires curl and Python 3.9+ and runs only from an external Bash terminal after the profile is stopped. Append arguments after `python3 -`:
 
 | Argument | Purpose |
 | --- | --- |
-| `--yes` / `--dry-run` | Execute the verified removal / read-only preview. |
+| `--yes` / `--dry-run` | Execute the verified removal and applicable authentication cleanup / list actions and prerequisites without writing files. |
 | `--profile <name>` | Select the original profile; required if multiple official installations exist. |
 | `--dsh-home <path>` | Select the original Harness home; defaults to nonempty `DSH_HOME` or otherwise `~/.dsh`. |
 | `--desktop-app <path>` | Select a macOS `.app` or Windows installation root to locate built-in dsh. |
 
-The script stops when runtime state cannot be verified or a package-manager lock exists. It does not terminate processes or clear locks. It checks standard application directories on macOS and registered built-in dsh on Windows; use `--desktop-app` if the location is ambiguous. For Linux Desktop, use the native plugin page; the uninstaller does not support that case. Preserve other plugins, configuration, and shared `DSH_HOME/openagent-auth`. Local removal does not revoke server-side authorization; never delete the entire home or another client's credentials.
+Before native removal, the target profile must be stopped and free of package-manager locks. The script does not terminate processes or clear locks. It checks standard application directories on macOS and registered built-in dsh on Windows; use `--desktop-app` if the location is ambiguous. For Linux Desktop bundle removal, use the native plugin page; the script does not support that removal case.
+
+After native removal succeeds and is verified, the complete uninstaller checks every profile under the same `DSH_HOME`. A `dsh-openagent` dependency, bundle registration, or package path from any source, including a broken link, counts as a usage record. If any remain, it preserves sign-in, lists the profiles, and exits successfully. It deletes the entire dedicated `DSH_HOME/openagent-auth` directory, including all cache versions, only after confirming that no other users remain, every profile in that home is stopped, no package-manager locks exist, and the authentication path and its entire tree contain no symbolic links, Windows junctions, or special files. Usage records and paths are checked again before deletion.
+
+During an actual cleanup run, if another profile, runtime state, or path cannot be verified, or a lock or abnormal file is found, authentication data is preserved and incomplete cleanup is reported with a nonzero exit code. A filesystem error during deletion also produces a nonzero exit code and reports possible remaining data without automatically retrying. If an older uninstaller already removed the plugin but left authentication data, the same script supports `--yes` or `--dry-run` without requiring a dsh CLI just to clean the cache. Repeated execution does nothing when the cache is also absent.
+
+Cleanup does not read credential contents or back up Tokens. It preserves other plugins, configuration, other authentication directories including `.mcp-auth`, conversations, and `.openagent-onboarding`. Local deletion does not revoke server-side authorization; never delete the entire home or another client's credentials.
