@@ -28,7 +28,7 @@ export function onboardingBusinessResult(result) {
 export class OpenAgentOnboarding extends TypertRemoteService {
   constructor(ctx) {
     super(ctx, 'openagentOnboarding')
-    const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
     this.store = createOnboardingStore({ profileDir: ctx.profileContext.dir, version })
     this.clients = new Map()
     this.requests = new Map()

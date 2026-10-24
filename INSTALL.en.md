@@ -49,7 +49,7 @@ On macOS / Linux, use `bash`:
 ```json
 {
   "description": "Connect OpenAgent and wait for browser authorization",
-  "command": "\"<absolute Node path>\" \"$DSH_PROFILE_DIR/node_modules/dsh-openagent/login.mjs\"",
+  "command": "\"<absolute Node path>\" \"$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/login.mjs\"",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "This sign-in needs to write the current Harness OpenAgent authentication directory and complete browser authorization."
@@ -61,7 +61,7 @@ On Windows, use `pwsh`:
 ```json
 {
   "description": "Connect OpenAgent and wait for browser authorization",
-  "command": "& '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/login.mjs')",
+  "command": "& '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/login.mjs')",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "This sign-in needs to write the current Harness OpenAgent authentication directory and complete browser authorization."
@@ -112,14 +112,14 @@ Bash:
 
 ```bash
 : "${DSH_PROFILE:?Current profile is missing}" "${DSH_PROFILE_DIR:?Current profile directory is missing}" "${DSH_SESSION_ID:?Current conversation ID is missing}"
-"<absolute Node path>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale en
+"<absolute Node path>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale en
 ```
 
 PowerShell:
 
 ```powershell
 if (-not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw 'Current Harness profile or conversation ID is missing' }
-& '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale en
+& '<absolute Node path>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale en
 ```
 
 Only a successful command exit with `OPENAGENT_ONBOARDING_PREPARED` permits reporting: “The installation files are ready and automatic verification is scheduled. After all tasks finish, quit and reopen Harness normally, then return to this installation conversation within 30 minutes.” End this turn. Once the original conversation is idle and uniquely visible and MCP and Skills are ready, the plugin performs that verification automatically. The user does not send a prompt, and the installation Agent does not call verify again. Do not force-kill processes or write a background restart script.
@@ -146,7 +146,7 @@ If `stop-profile` is returned, the user must finish tasks and quit the target cl
 dsh plugin --profile <original profile> remove dsh-openagent
 ```
 
-Only after removal is confirmed, reinstallation is needed, and the profile remains stopped, use `dsh plugin --profile <original profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'`. Before starting the client, use the verified absolute Node path to run `login.mjs` in that actual profile's package directory, following the single-attempt sign-in rules in step 3; do not assume host-injected variables exist in an external terminal. Continue verification after reopening. The native Plugins page also supports install, enable, and remove operations as a manual maintenance entry; it does not replace execution by an installation Agent that has the tools.
+Only after removal is confirmed, reinstallation is needed, and the profile remains stopped, use `dsh plugin --profile <original profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'`. Before starting the client, use the verified absolute Node path to run `runtime/login.mjs` in that actual profile's package directory, following the single-attempt sign-in rules in step 3; do not assume host-injected variables exist in an external terminal. Continue verification after reopening. The native Plugins page also supports install, enable, and remove operations as a manual maintenance entry; it does not replace execution by an installation Agent that has the tools.
 
 The one-line uninstaller for an independent external terminal is in the [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD) and requires curl and Python 3.9+. It requires a stopped target profile, accepts only the official sources above, and preserves other plugins and configuration. Append options after `python3 -`:
 

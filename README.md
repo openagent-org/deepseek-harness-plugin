@@ -2,6 +2,8 @@
 
 在 DeepSeek Harness 中发现和调用 OpenAgent、上传任务附件，并查询 OpenAgent 余额。支持 Harness `>=0.2.1-rc.2 <0.3.0` 的本地 Desktop、Web 和 CLI。
 
+根目录保留包声明、安装文档和卸载入口；运行文件集中在 `runtime/`，语言资源和业务 Skills 分别保留在 `locale/` 和 `skills/`。
+
 ## 安装
 
 在新对话选择“创造 / Creator”模式，把[中文安装指南](./INSTALL.md)或[英文安装指南](./INSTALL.en.md)交给安装 Agent，并要求实际安装和验收。当前会话已提供 `plugin_manager` 时可以直接继续，无需换模式。Agent 通过原生工具安装、等待一次登录并自动完成新对话验收；用户处理必要审批和网页授权。

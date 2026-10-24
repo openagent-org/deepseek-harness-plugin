@@ -13,7 +13,7 @@ export async function apply(ctx) {
   await ctx.plugin(SkillFilesystem, {
     providerName: 'openagent',
     includeDefaultRoots: false,
-    bundledSkillDir: fileURLToPath(new URL('./skills/', import.meta.url)),
+    bundledSkillDir: fileURLToPath(new URL('../skills/', import.meta.url)),
   })
   ctx.inject(['typert'], async scope => { await scope.plugin(Browser) })
   try {

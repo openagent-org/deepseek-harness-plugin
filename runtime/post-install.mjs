@@ -196,7 +196,7 @@ async function main() {
     ...['git+https://', 'https://'].flatMap(prefix => ['github.com', 'gitee.com'].map(host => `${prefix}${host}/openagent-org/deepseek-harness-plugin.git#rel`))])
   if (!sources.length || sources.some(source => !official.has(source))) fail()
   const installed = await realpath(join(profileDir, 'node_modules', 'dsh-openagent'))
-  if (!installed.startsWith(join(profileDir, 'node_modules') + sep) || installed !== dirname(fileURLToPath(import.meta.url))) fail()
+  if (!installed.startsWith(join(profileDir, 'node_modules') + sep) || installed !== dirname(dirname(fileURLToPath(import.meta.url)))) fail()
   const packageJson = await readJson(join(installed, 'package.json'), false)
   if (packageJson?.name !== 'dsh-openagent' || !versionOk(packageJson.version)) fail()
   const result = await prepareOnboarding({ profileDir, version: packageJson.version, sourceSessionId, locale: options['--locale'] ?? 'zh-CN' })

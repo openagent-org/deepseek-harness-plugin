@@ -49,7 +49,7 @@ macOS / Linux 使用 `bash`：
 ```json
 {
   "description": "连接 OpenAgent 并等待网页授权",
-  "command": "\"<Node 绝对路径>\" \"$DSH_PROFILE_DIR/node_modules/dsh-openagent/login.mjs\"",
+  "command": "\"<Node 绝对路径>\" \"$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/login.mjs\"",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "本次登录需要写入当前 Harness 的 OpenAgent 专用认证目录并完成浏览器授权。"
@@ -61,7 +61,7 @@ Windows 使用 `pwsh`：
 ```json
 {
   "description": "连接 OpenAgent 并等待网页授权",
-  "command": "& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/login.mjs')",
+  "command": "& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/login.mjs')",
   "run_in_background": true,
   "sandbox_permissions": "danger-full-access",
   "justification": "本次登录需要写入当前 Harness 的 OpenAgent 专用认证目录并完成浏览器授权。"
@@ -112,14 +112,14 @@ Bash：
 
 ```bash
 : "${DSH_PROFILE:?未取得当前 profile}" "${DSH_PROFILE_DIR:?未取得当前 profile 路径}" "${DSH_SESSION_ID:?未取得当前会话标识}"
-"<Node 绝对路径>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale zh-CN
+"<Node 绝对路径>" "$DSH_PROFILE_DIR/node_modules/dsh-openagent/runtime/post-install.mjs" --prepare --profile "$DSH_PROFILE" --locale zh-CN
 ```
 
 PowerShell：
 
 ```powershell
 if (-not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSION_ID) { throw '未取得当前 Harness profile 或会话标识' }
-& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
+& '<Node 绝对路径>' (Join-Path $env:DSH_PROFILE_DIR 'node_modules/dsh-openagent/runtime/post-install.mjs') --prepare --profile $env:DSH_PROFILE --locale zh-CN
 ```
 
 仅命令成功结束并输出 `OPENAGENT_ONBOARDING_PREPARED` 时报告：“安装文件已就绪，自动验收已预约。请在所有任务结束后正常退出并重开 Harness，30 分钟内回到本安装会话。”随即结束本轮。原会话空闲且唯一可见、MCP 与 Skills 可用后，插件自动完成上述验收，无需用户发提示，也不再调用 verify。禁止强制结束进程或编写后台重启脚本。
@@ -146,7 +146,7 @@ if (-not $env:DSH_PROFILE -or -not $env:DSH_PROFILE_DIR -or -not $env:DSH_SESSIO
 dsh plugin --profile <原 profile> remove dsh-openagent
 ```
 
-仅已确认移除、需要重装且 profile 仍停止时，使用 `dsh plugin --profile <原 profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'`。启动前，用已核对的 Node 绝对路径运行该实际 profile 包目录中的 `login.mjs`，按第 3 步的单次登录规则处理；外部终端不假定存在宿主注入变量。重开后继续验收。原生插件页面也能完成安装、启用和移除，作为人工维护入口，不代替具备工具的安装 Agent 执行主流程。
+仅已确认移除、需要重装且 profile 仍停止时，使用 `dsh plugin --profile <原 profile> add 'git+https://github.com/openagent-org/deepseek-harness-plugin.git#rel'`。启动前，用已核对的 Node 绝对路径运行该实际 profile 包目录中的 `runtime/login.mjs`，按第 3 步的单次登录规则处理；外部终端不假定存在宿主注入变量。重开后继续验收。原生插件页面也能完成安装、启用和移除，作为人工维护入口，不代替具备工具的安装 Agent 执行主流程。
 
 独立外部终端的一行卸载入口见 [README](https://github.com/openagent-org/deepseek-harness-plugin/blob/rel/README.md#%E5%8D%B8%E8%BD%BD)，需要 curl 和 Python 3.9+。脚本要求目标 profile 已停止，只接受上述官方来源，保留其他插件和配置；参数追加在 `python3 -` 后：
 
