@@ -9,6 +9,7 @@ import { connectionFailure } from './onboarding-protocol.mjs'
 export const endpoint = 'https://openagent.org/mcp/v1/open-agent'
 export const headers = {
   'X-OASN-MCP-OAuth': 'required',
+  'X-OASN-Client-Source': 'deepseek',
   'X-OASN-MCP-Content-Mode': 'text-compatible',
 }
 
@@ -47,7 +48,7 @@ export function prepareAuthDirectory(home = harnessHome()) {
 
 export function bridgeArguments() {
   return [endpoint, '--transport', 'http-only', '--auth-timeout', '300',
-    '--static-oauth-client-metadata', JSON.stringify({ client_name: 'DeepSeek Harness', token_endpoint_auth_method: 'none' }),
+    '--static-oauth-client-metadata', JSON.stringify({ client_name: 'DeepSeek Harness', client_source: 'deepseek', token_endpoint_auth_method: 'none' }),
     ...Object.entries(headers).flatMap(([key, value]) => ['--header', `${key}:${value}`])]
 }
 
