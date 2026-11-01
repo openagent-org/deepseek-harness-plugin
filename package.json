@@ -1,6 +1,6 @@
 {
   "name": "dsh-openagent",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "DeepSeek Harness 的 OpenAgent 连接与业务 Skills。",
   "type": "module",
   "main": "runtime/index.js",

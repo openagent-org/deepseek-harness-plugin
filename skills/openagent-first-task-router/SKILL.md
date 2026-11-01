@@ -265,7 +265,7 @@ This applies to every initial invocation, retry, refinement, and Remote Agent sw
 
 Receive the selected Remote Agent and complete invocation data (`data`).
 
-Generate one stable `idempotency_key` for the prepared invocation.
+Generate one stable `idempotency_key` for the prepared invocation. Read and follow [Agent Execution and Browser Progress](../openagent-run-agent/SKILL.md#agent-execution) for the progress display, Tool Result Mapping, right-sidebar opening, and failure handling. DeepSeek Harness currently uses browser progress; prefer the default card only when the current Host explicitly supports MCP Apps, omitting `display_mode` in that case.
 
 First, call `openagent_progress` as a standalone first-class tool call:
 
@@ -273,11 +273,13 @@ First, call `openagent_progress` as a standalone first-class tool call:
 openagent_progress(
   agent_id=<selected Remote Agent ID>,
   agent_name=<selected Remote Agent name>,
-  idempotency_key=<invocation key>
+  idempotency_key=<invocation key>,
+  locale=<same invocation locale>,
+  display_mode="browser"
 )
 ```
 
-Surface the complete native `openagent_progress` result when DeepSeek Harness can display it; otherwise provide only a brief user-visible progress message. After that, call `openagent_run` once through the native MCP tool, followed only by the checkpoint cleanup below:
+After `openagent_progress` returns, apply the linked Browser Progress steps to its current result before calling Run. Authentication failure stops execution; other display failures do not. Then call `openagent_run` once through the native MCP tool, followed only by the checkpoint cleanup below:
 
 ```text
 openagent_run(
@@ -291,11 +293,11 @@ openagent_run(
 
 Rules:
 
-- Call `openagent_progress` first, then call `openagent_run` after the progress result is surfaced.
+- Call `openagent_progress` first, handle the selected progress display, then call `openagent_run` without waiting for the page or Socket.
 - Keep `openagent_progress` as a standalone first-class tool call; do not batch or parallelize it with `openagent_run`.
 - Use the same stable `idempotency_key` for both calls.
 - When attachments were uploaded, pass every returned `structuredContent.attachment` object in `data` exactly as required by `Send Attachments`.
-- Surface the native `openagent_progress` result directly when supported; if DeepSeek Harness cannot display it, use only the brief progress message above.
+- Use one progress display per invocation. Do not repeat progress, reopen its page, or switch displays after a display failure.
 - Treat only the `openagent_run` response as the task result.
 - After the same native `openagent_run` call completes, only when its mapped result has `isError=false` and `structuredContent.status=completed`, best-effort run `node <installed router Skill>/../openagent-run-agent/scripts/cos_upload.cjs --forget-resource-id <resource_id>` for each local-file resource prepared for this invocation, using the authorization rules in `Send Attachments`. Keep checkpoints for failed or unknown Runs. Cleanup failure must not change the original result or trigger another grant, upload, or Run; a missing checkpoint is not a reason to reupload. Return the original Run Tool Result.
 

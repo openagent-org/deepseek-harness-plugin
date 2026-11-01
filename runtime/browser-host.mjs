@@ -22,6 +22,7 @@ export class OpenAgentBrowser extends TypertRemoteService {
     this.requests = new Map()
     this.handoffs = new Map()
     this.selections = new Map()
+    this.progresses = new Map()
     this.tabs = new Map()
     ctx.effect(() => () => {
       for (const client of this.clients.values()) client.stop()
@@ -30,6 +31,7 @@ export class OpenAgentBrowser extends TypertRemoteService {
       this.requests.clear()
       this.handoffs.clear()
       this.selections.clear()
+      this.progresses.clear()
       this.tabs.clear()
     }, 'openagent-browser.lifecycle')
   }
@@ -113,16 +115,29 @@ export class OpenAgentBrowser extends TypertRemoteService {
       this.selections.set(selection, previous)
       return previous.result ?? previous.promise
     }
-    const clients = [...this.clients.values()].filter(client => client.sessionId === sessionId)
-    if (clients.length !== 1) {
-      const result = failure(clients.length ? 'AMBIGUOUS_CLIENT' : 'NO_CLIENT')
-      this.selections.set(selection, { result })
-      return result
-    }
-    const request = this.request(clients[0], 'open', randomUUID(), execution.signal, { url })
-    this.handoffs.set(key, request)
+    const request = this.requestOpen(sessionId, url, execution.signal)
+    if (request.promise) this.handoffs.set(key, request)
     this.selections.set(selection, request)
-    return request.promise
+    return request.result ?? request.promise
+  }
+
+  async progress(args, execution) {
+    const sessionId = sessionOf(execution)
+    if (typeof args.idempotency_key !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(args.idempotency_key)) {
+      throw new Error('OPENAGENT_BROWSER_INVALID_IDEMPOTENCY_KEY')
+    }
+    const url = validateHandoffUrl(args.browser_url)
+    if (new URL(url).pathname !== '/browser/handoff') throw new Error('OPENAGENT_BROWSER_INVALID_HANDOFF')
+    const key = JSON.stringify([sessionId, args.idempotency_key])
+    const request = this.progresses.get(key) ?? this.requestOpen(sessionId, url, execution.signal)
+    this.progresses.set(key, request)
+    return request.result ?? request.promise
+  }
+
+  requestOpen(sessionId, url, signal) {
+    const clients = [...this.clients.values()].filter(client => client.sessionId === sessionId)
+    if (clients.length !== 1) return { result: failure(clients.length ? 'AMBIGUOUS_CLIENT' : 'NO_CLIENT') }
+    return this.request(clients[0], 'open', randomUUID(), signal, { url })
   }
 
   status(args, execution) {
@@ -181,6 +196,10 @@ function registerTools(ctx) {
   }
   for (const [method, description, parameters] of [
     ['open', '在当前会话唯一可见的 Harness 右侧浏览器打开 OpenAgent 选择页。opened 只确认标签提交，未确认网页加载。失败或未确认时不要重开。', handoff],
+    ['progress', '在当前会话唯一可见的 Harness 右侧浏览器打开 OpenAgent 进度页。同一幂等键只开一次并保留页面；opened 只确认标签提交，失败或未确认时不要重开。', {
+      idempotency_key: { type: 'string', required: true, description: '本次 openagent_progress 与 openagent_run 共用的原 idempotency_key。' },
+      browser_url: { type: 'string', required: true, description: '同次进度结果返回的原始 HTTPS browser_url；不要修改。' },
+    }],
     ['status', '只读取本会话该选择最近一次 OpenAgent 开页请求的安全回执；用于一次超时恢复，不打开或读取网页，不返回 URL。', { selection_id: handoff.selection_id }],
     ['close', '仅关闭本流程创建且已确认的 OpenAgent 标签；只接受 open/status 返回的 tab_handle。', {
       tab_handle: { type: 'string', required: true, description: '当前流程 open/status 返回的 owned tab_handle。' },
@@ -190,7 +209,7 @@ function registerTools(ctx) {
       name: `openagent_browser_${method}`, description, parameters,
       output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
       execute: (args, execution) => ctx.openagentBrowser[method](args, execution),
-      presentCall: () => ({ card: 'generic', title: 'OpenAgent 选择页' }),
+      presentCall: () => ({ card: 'generic', title: method === 'progress' ? 'OpenAgent 进度页' : 'OpenAgent 选择页' }),
     }))
   }
 }

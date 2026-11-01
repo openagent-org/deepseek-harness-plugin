@@ -26,7 +26,7 @@ export async function loadBridgeRuntime() {
 }
 
 export function bridgeTransports(local, remote, { onFailure = () => {}, onClosed = () => {} } = {}) {
-  const pending = new Set()
+  const pending = new Map()
   let initializeId
   let closing
   const close = () => {
@@ -44,7 +44,7 @@ export function bridgeTransports(local, remote, { onFailure = () => {}, onClosed
     const http = Number.isInteger(error?.code) && error.code >= 100 && error.code <= 599 ? error.code : undefined
     const data = { connection_code: connectionFailure(error, 'mcp').code,
       ...(diagnosticCodes.has(error?.code) ? { code: error.code } : {}), ...(http ? { http_status: http } : {}) }
-    await Promise.allSettled([...pending].map(id => local.send({ jsonrpc: '2.0', id, error: {
+    await Promise.allSettled([...pending.keys()].map(id => local.send({ jsonrpc: '2.0', id, error: {
       code: -32000, message: (remote.wasSent?.(id) === false
         ? error?.code === 'OPENAGENT_MCP_LOGIN_REQUIRED'
           ? 'OpenAgent 当前凭据无法静默刷新，请由用户手动登录并完成授权；该请求尚未发送，不会自动重试。'
@@ -57,7 +57,8 @@ export function bridgeTransports(local, remote, { onFailure = () => {}, onClosed
   }
   local.onmessage = message => {
     if (failed || closing) return
-    if (message.method && message.id !== undefined) pending.add(message.id)
+    if (message.method && message.id !== undefined) pending.set(message.id,
+      message.method === 'tools/call' ? message.params?.name : undefined)
     if (message.method === 'initialize') initializeId = message.id
     if (message.method === 'notifications/cancelled') pending.delete(message.params?.requestId)
     // 不串行等待长时间 tools/call，取消通知必须能立即转发。
@@ -69,7 +70,14 @@ export function bridgeTransports(local, remote, { onFailure = () => {}, onClosed
       initializeId = undefined
       if (typeof message.result?.protocolVersion === 'string') remote.setProtocolVersion(message.result.protocolVersion)
     }
-    // JSON-RPC error 与 result 都完整交给 Host；不假定 tools/list 一定有 result.tools。
+    // Harness 只把 content 交给模型；网页进度需附带原结构化结果，私有 _meta 不进入正文。
+    const progress = message.result?.structuredContent
+    if (!message.method && pending.get(message.id) === 'openagent_progress' && !message.result?.isError
+      && progress?.view === 'agent_progress' && progress.display_mode === 'browser') {
+      message = { ...message, result: { ...message.result, content: [...(message.result.content ?? []),
+        { type: 'text', text: JSON.stringify(progress) }] } }
+    }
+    // JSON-RPC error 与其他 result 原样交给 Host；不假定 tools/list 一定有 result.tools。
     if (!message.method && message.id !== undefined) pending.delete(message.id)
     Promise.resolve().then(() => local.send(message)).catch(fail)
   }
